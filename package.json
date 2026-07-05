@@ -1,0 +1,15 @@
+{
+  "name": "obd2-elm327-bluetooth",
+  "version": "1.0.0",
+  "description": "Node.js Bluetooth OBD2 application for ELM327 devices",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "edwinspire",
+  "license": "ISC",
+  "dependencies": {
+    "serialport": "^12.0.0"
+  }
+}

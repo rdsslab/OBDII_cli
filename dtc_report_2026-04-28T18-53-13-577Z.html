@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reporte de Diagnóstico OBD2</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --danger: #dc2626;
+            --danger-bg: #fee2e2;
+            --warning: #d97706;
+            --warning-bg: #fef3c7;
+            --success: #16a34a;
+            --success-bg: #dcfce7;
+            --dark: #1f2937;
+            --gray: #4b5563;
+            --light: #f3f4f6;
+            --white: #ffffff;
+            --border: #e5e7eb;
+            --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background-color: var(--light);
+            color: var(--dark);
+            line-height: 1.6;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background-color: var(--white);
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            margin-bottom: 2rem;
+            border-top: 5px solid var(--primary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            color: var(--dark);
+            font-size: 1.8rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .header .meta {
+            color: var(--gray);
+            font-size: 0.95rem;
+        }
+
+        .dtc-card {
+            background-color: var(--white);
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            margin-bottom: 1.5rem;
+            overflow: hidden;
+            transition: transform 0.2s ease;
+        }
+
+        .dtc-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .dtc-header {
+            background-color: var(--dark);
+            color: var(--white);
+            padding: 1.25rem 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .dtc-header h2 {
+            font-size: 1.5rem;
+            letter-spacing: 1px;
+            margin: 0;
+            color: #ef4444; /* Rojo para los códigos */
+        }
+
+        .badge {
+            background-color: rgba(255,255,255,0.1);
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+        
+        .badge.unknown {
+            background-color: var(--warning);
+            color: white;
+        }
+
+        .dtc-body {
+            padding: 1.5rem;
+        }
+
+        .section-title {
+            font-weight: 600;
+            margin: 1.25rem 0 0.5rem 0;
+            color: var(--dark);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        ul, ol {
+            padding-left: 1.5rem;
+            margin-bottom: 1rem;
+            color: var(--gray);
+        }
+
+        li { margin-bottom: 0.25rem; }
+
+        .warning-box {
+            background-color: var(--danger-bg);
+            border-left: 4px solid var(--danger);
+            padding: 1rem;
+            margin-top: 1.5rem;
+            border-radius: 0 8px 8px 0;
+            color: var(--danger);
+        }
+
+        .alert {
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+
+        .alert.warning {
+            background-color: var(--warning-bg);
+            border: 1px solid #fcd34d;
+            color: #92400e;
+        }
+        
+        .alert.success {
+            background-color: var(--success-bg);
+            border: 1px solid #86efac;
+            color: #166534;
+            font-weight: 600;
+            text-align: center;
+            padding: 2rem;
+            font-size: 1.2rem;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 3rem;
+            color: var(--gray);
+            font-size: 0.875rem;
+        }
+        
+        @media (max-width: 600px) {
+            body { padding: 1rem; }
+            .header { flex-direction: column; align-items: flex-start; gap: 1rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1>🚗 Reporte de Diagnóstico OBD2</h1>
+                <div class="meta">Códigos de falla detectados en la unidad de control.</div>
+            </div>
+            <div style="text-align: right;">
+                <strong>Fecha y Hora:</strong><br>
+                28/4/2026, 1:53:13 p. m.
+            </div>
+        </div>
+
+        <div class="alert success">✅ No se detectaron códigos de error (DTCs) en este escaneo.</div>
+
+        <div class="footer">
+            Generado automáticamente por OBD2 ELM327 Bluetooth Scanner.
+        </div>
+    </div>
+</body>
+</html>
