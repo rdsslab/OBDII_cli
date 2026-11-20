@@ -14,6 +14,8 @@ const STATUS_TEXT = { disconnected: 'Desconectado', connecting: 'Conectando…',
 const MODE_TEXT = { kwp2000: 'KWP2000 (ISO 14230)', obd2: 'OBD2 estándar', unknown: 'sin respuesta' };
 
 export function startApp(client) {
+    const caps = client.capabilities || {};
+    const needsPin = caps.clearNeedsPin !== false;   // server: PIN; PWA: confirmation only
     let state = {};
     let busy = false;
     const stats = new Map();      // field name -> {min, max}
@@ -84,9 +86,10 @@ export function startApp(client) {
         const canClear = !!state.clearEnabled && typeof client.clearDtcs === 'function';
         $('clearDtc').hidden = !canClear;
         $('clearDtc').disabled = busy || !connected;
-        $('clearHint').textContent = canClear
-            ? 'Borrar códigos pide el PIN del servidor y solo funciona con el motor apagado.'
-            : 'Borrar códigos está deshabilitado: inicia el servidor con --pin para habilitarlo.';
+        $('clearHint').textContent = !canClear
+            ? 'Borrar códigos está deshabilitado: inicia el servidor con --pin para habilitarlo.'
+            : needsPin ? 'Borrar códigos pide el PIN del servidor y solo funciona con el motor apagado.'
+            : 'Borrar códigos pide confirmación y solo funciona con el motor apagado.';
         $('readEcu').disabled = busy || !connected;
 
         const live = state.live || {};
@@ -105,7 +108,7 @@ export function startApp(client) {
         const prev = sel.value || state.port;
         sel.innerHTML = ports.map(p => {
             const tag = p.bt === 'outgoing' ? ' — probable ELM327' : p.bt === 'incoming' ? ' — BT entrante' : '';
-            return `<option value="${esc(p.path)}">${esc(p.path)}${esc(tag)}</option>`;
+            return `<option value="${esc(p.path)}">${esc(p.label || p.path)}${esc(tag)}</option>`;
         }).join('') || '<option value="">(sin puertos)</option>';
         const best = ports.find(p => p.path === prev) || ports.find(p => p.bt === 'outgoing') || ports[0];
         if (best) sel.value = best.path;
@@ -115,6 +118,7 @@ export function startApp(client) {
     function portHint() {
         const p = ports.find(x => x.path === $('port').value);
         $('portHint').textContent = !p ? '' :
+            p.isNew ? 'Al conectar, el navegador te pedirá elegir el adaptador. Emparéjalo antes en los ajustes de Bluetooth (PIN 1234 o 0000).' :
             p.bt === 'outgoing' ? `Bluetooth saliente ${p.mac}: este es normalmente el ELM327.` :
             p.bt === 'incoming' ? 'Puerto Bluetooth entrante: normalmente NO responde. Elige el saliente.' :
             p.friendlyName;
@@ -254,9 +258,11 @@ export function startApp(client) {
     const dlg = $('clearDialog');
     $('clearDtc').addEventListener('click', () => {
         $('clearPin').value = '';
+        $('clearPin').required = needsPin;
+        $('clearPinField').hidden = !needsPin;
         $('clearError').hidden = true;
         dlg.showModal();
-        $('clearPin').focus();
+        (needsPin ? $('clearPin') : $('clearCancel')).focus();
     });
     $('clearCancel').addEventListener('click', () => dlg.close());
     $('clearForm').addEventListener('submit', async (ev) => {
@@ -319,6 +325,12 @@ export function startApp(client) {
         .on('link', ({ online }) => {
             if (!online) { state = { ...state, status: 'offline' }; render(); }
         });
+
+    // Platform differences come from the client's capabilities
+    $('sessionHint').textContent = caps.sharedSession
+        ? 'Pon el contacto en ON antes de conectar. La conexión es compartida: todos los dispositivos ven la misma sesión.'
+        : 'Pon el contacto en ON antes de conectar. Este dispositivo se conecta directo al ELM327.';
+    $('unsupported').hidden = caps.webSerial !== false;
 
     renderDtcs(null);
     renderEcu(null);

@@ -260,7 +260,12 @@ Con la opción B, el núcleo necesita un transporte "KWP crudo" además del de c
    - `packages/ui`: interfaz web sin compilación, con un "cliente" intercambiable (`RemoteClient` para el servidor; la PWA tendrá un `DirectClient` con Web Serial y el mismo contrato).
    - `apps/server`: solo `node:http`, sin dependencias externas. Usa Server-Sent Events en lugar de WebSocket: el envío es unidireccional (servidor → navegadores) y los comandos van por `fetch`.
    - Modo `--sim` con el transporte simulado para probar sin el auto.
-3. **`obd-pwa`.** Misma interfaz con el transporte Web Serial; probar en el teléfono (`chrome://version` ≥ 137).
+3. ✅ **`obd-pwa` (2026-11-20).**
+   - `packages/core/src/session.js`: `ObdSession`, la lógica de sesión que antes estaba en el servidor; ahora la comparten el servidor y la PWA.
+   - `packages/web-serial`: transporte Web Serial (USB y Bluetooth SPP emparejado; detecta la pérdida del enlace).
+   - `packages/ui/src/clients/direct-client.js`: mismo contrato que `RemoteClient`, ejecutando la sesión en el navegador.
+   - `apps/pwa`: compilación sin dependencias (*import map*), manifiesto, íconos, service worker para uso sin conexión y workflow de GitHub Pages.
+   - Probado con un puerto Web Serial simulado en Node y en Chrome headless (sin errores, instalable). **Falta probarlo con el ELM327 real**: en Chrome de la laptop (COM6) y en el teléfono.
 4. **`obd-android`.** Capacitor + plugin Bluetooth serie; probar en el teléfono y luego en el radio.
 5. **`obd-esp32`.** Hardware propio sin ELM327. Necesita los pasos 1 y 2 (el core y `obd-ui`) si se sigue la opción B. El trabajo del hardware y del firmware se puede adelantar en paralelo.
 

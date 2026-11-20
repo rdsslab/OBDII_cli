@@ -48,6 +48,7 @@
           </div>
         </label>
         <p id="portHint" class="hint"></p>
+        <p id="unsupported" class="error" hidden>Este navegador no soporta Web Serial. Abre esta página en Chrome o Edge (en Android, Chrome actualizado) y empareja antes el ELM327 en los ajustes de Bluetooth.</p>
         <label class="field">Perfil de ECU
           <select id="profile"></select>
         </label>
@@ -67,7 +68,7 @@
           <dt>Perfil</dt><dd id="sProfile">—</dd>
           <dt>Batería (ATRV)</dt><dd id="sVolt">—</dd>
         </dl>
-        <p class="hint">Pon el contacto en ON antes de conectar. La conexión es compartida: todos los dispositivos ven la misma sesión.</p>
+        <p id="sessionHint" class="hint">Pon el contacto en ON antes de conectar.</p>
       </div>
     </section>
 
@@ -122,8 +123,8 @@
         <li>Los códigos memorizados se pierden. Guarda antes el reporte HTML si los necesitas.</li>
         <li>Si la falla sigue presente, el código vuelve cuando la ECU la detecta de nuevo, normalmente con el motor en marcha. En este auto se espera que P1535 vuelva, porque no tiene A/C.</li>
       </ul>
-      <label class="field">PIN
-        <input id="clearPin" type="password" inputmode="numeric" autocomplete="off" required minlength="4">
+      <label id="clearPinField" class="field">PIN
+        <input id="clearPin" type="password" inputmode="numeric" autocomplete="off" minlength="4">
       </label>
       <p id="clearError" class="error" hidden></p>
       <div class="row actions">
@@ -135,10 +136,7 @@
 
   <div id="toast" class="toast" role="status" hidden></div>
 
-  <script type="module">
-    import { startApp } from './src/app.js';
-    import { RemoteClient } from './src/clients/remote-client.js';
-    startApp(new RemoteClient());
-  </script>
+  <!-- obdii:entry (the PWA build replaces this line with main-direct.js) -->
+  <script type="module" src="src/main-remote.js"></script>
 </body>
 </html>

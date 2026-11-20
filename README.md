@@ -45,10 +45,13 @@ Monorepo con *npm workspaces*: un núcleo independiente de la plataforma y una a
   - 📄 [**dtc-database.js**](packages/core/src/dtc-database.js): base de datos de códigos de error y plantilla del reporte HTML en español.
   - 📁 [**test/**](packages/core/test/): pruebas con un ELM327 + ECU simulados a partir de capturas reales del vehículo (`npm test`).
   - 📄 [**diagnostics.js**](packages/core/src/diagnostics.js): lógica de alto nivel (DTCs con su explicación, muestreo en tiempo real, identificación de la ECU) que devuelve JSON; la usan el servidor web y, más adelante, la PWA y la app Android.
+  - 📄 [**session.js**](packages/core/src/session.js): `ObdSession`, la sesión compartida (conexión, tiempo real con recuperación escalonada, borrado). La usan el servidor y la PWA.
   - 📄 [**sim-transport.js**](packages/core/src/sim-transport.js): ELM327 + ECU SIM2K-33 simulados con capturas reales, para pruebas y demostraciones sin el auto.
 - 📁 **packages/serial-node/** (`@obdii/serial-node`): transporte para Node.js con `serialport` (puerto COM / Bluetooth SPP). Lo usan la consola y el servidor web.
 - 📁 **packages/ui/** (`@obdii/ui`): interfaz web común, sin paso de compilación (HTML + CSS + JavaScript). Pantallas de conexión, tiempo real (con modo tablero), códigos, ECU y registro.
+- 📁 **packages/web-serial/** (`@obdii/web-serial`): transporte Web Serial para el navegador (Chrome / Edge; adaptador USB o Bluetooth emparejado).
 - 📁 **apps/server/** (`@obdii/server`): servidor web local; se conecta al ELM327 y sirve la interfaz a todos los dispositivos de la red.
+- 📁 **apps/pwa/** (`@obdii/pwa`): app web instalable (PWA) que se conecta directo al ELM327 con Web Serial; se publica en GitHub Pages.
 - 📁 **apps/cli/** (`@obdii/cli`): la aplicación de consola.
   - 📄 [**src/index.js**](apps/cli/src/index.js): menús interactivos, monitor en tiempo real, CSV y presentación con colores ANSI.
 
@@ -124,6 +127,29 @@ Al arrancar muestra las direcciones para abrir desde otros dispositivos (por eje
 **Escrituras en la ECU:** la única es «Borrar códigos» (servicio `14 FF 00` / OBD2 `04`), y solo con PIN. No hay funciones para reiniciar la ECU ni activar actuadores. Si se cae la conexión con la ECU durante el tiempo real, recupera la sesión sola (≈6 s de silencio en la línea K, igual que la consola). `Ctrl+C` cierra la sesión con la ECU (`82`) antes de salir.
 
 La pestaña inicial se puede elegir en la URL: `#conn`, `#live`, `#dtc`, `#ecu`, `#log`.
+
+---
+
+## 📱 App web instalable (PWA)
+
+La misma interfaz, pero el navegador se conecta **directo** al ELM327 con Web Serial: no hace falta la laptop ni el servidor. Funciona en **Chrome o Edge**: en escritorio, y en Android con un Chrome reciente que soporte Web Serial por Bluetooth. No funciona en Firefox, en iPhone ni dentro de otras apps.
+
+1. Empareja el ELM327 en los ajustes de Bluetooth del dispositivo (PIN habitual `1234` o `0000`).
+2. Abre la PWA y, en **Conexión**, elige «Elegir adaptador…» y pulsa **Conectar**. El navegador muestra la lista de adaptadores; elige el ELM327. La próxima vez aparece como «usado antes».
+3. Para instalarla, usa la opción «Instalar app» o «Agregar a la pantalla principal» de Chrome. Después funciona sin internet.
+
+**Probar en esta computadora** (localhost cuenta como contexto seguro, así que Web Serial funciona):
+
+```bash
+npm run pwa          # compila apps/pwa/dist y la sirve en http://localhost:5173
+npm run pwa:build    # solo compila
+```
+
+En Windows, el ELM327 emparejado aparece en el selector como su puerto COM (el saliente, p. ej. COM6).
+
+**Publicación:** el workflow [.github/workflows/pages.yml](.github/workflows/pages.yml) prueba el núcleo, compila y publica `apps/pwa/dist` en GitHub Pages en cada push a `main` que toque la PWA, la interfaz o el núcleo. La compilación no usa dependencias: copia la interfaz y el núcleo y resuelve los módulos con un *import map*.
+
+Diferencias con el servidor: la sesión es de un solo dispositivo, y «Borrar códigos» pide confirmación pero no PIN.
 
 ---
 

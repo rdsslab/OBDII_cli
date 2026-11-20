@@ -12,7 +12,9 @@
     "start": "node index.js",
     "cli": "npm start -w @obdii/cli",
     "server": "npm start -w @obdii/server --",
-    "test": "npm test --workspaces --if-present"
+    "test": "npm test --workspaces --if-present",
+    "pwa": "npm start -w @obdii/pwa",
+    "pwa:build": "npm run build -w @obdii/pwa"
   },
   "author": "edwinspire",
   "license": "ISC"

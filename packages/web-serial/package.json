@@ -1,0 +1,12 @@
+{
+  "name": "@obdii/web-serial",
+  "version": "1.0.0",
+  "description": "Web Serial transport (Chrome/Edge; USB and paired Bluetooth SPP adapters) for @obdii/core",
+  "type": "module",
+  "private": true,
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "license": "ISC"
+}

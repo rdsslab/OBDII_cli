@@ -4,5 +4,12 @@
   "description": "Shared web UI (no build step): DTCs, real-time dashboard, ECU info. Used by the server, the PWA and the Android app",
   "type": "module",
   "private": true,
-  "license": "ISC"
+  "license": "ISC",
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "@obdii/core": "1.0.0",
+    "@obdii/web-serial": "1.0.0"
+  }
 }

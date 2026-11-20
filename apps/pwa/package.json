@@ -1,0 +1,17 @@
+{
+  "name": "@obdii/pwa",
+  "version": "1.0.0",
+  "description": "Installable web app (PWA): connects straight to the ELM327 with Web Serial; published on GitHub Pages",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "node build.mjs && node serve.mjs"
+  },
+  "dependencies": {
+    "@obdii/core": "1.0.0",
+    "@obdii/ui": "1.0.0",
+    "@obdii/web-serial": "1.0.0"
+  },
+  "license": "ISC"
+}
