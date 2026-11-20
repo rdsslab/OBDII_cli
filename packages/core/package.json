@@ -1,0 +1,16 @@
+{
+  "name": "@obdii/core",
+  "version": "1.0.0",
+  "description": "Platform-independent ELM327 / KWP2000 / OBD2 protocol core (ECU profiles, live data decoding, DTC database)",
+  "type": "module",
+  "private": true,
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./*": "./src/*"
+  },
+  "license": "ISC",
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  }
+}

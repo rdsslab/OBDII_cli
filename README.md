@@ -35,16 +35,18 @@ Una aplicación interactiva en línea de comandos (CLI) desarrollada en **Node.j
 
 ## 📁 Estructura del Proyecto
 
-El código está estructurado de manera modular y limpia:
+Monorepo con *npm workspaces*: un núcleo independiente de la plataforma y una aplicación por plataforma (ver [docs/PROYECTOS_FUTUROS.md](docs/PROYECTOS_FUTUROS.md)).
 
-- 📄 [**index.js**](file:///d:/edwinspire/OtrosProyectos/OBDII_cli/index.js): Punto de entrada principal que ejecuta la aplicación en Node.js.
-- 📁 **src/**
-  - 📄 [**index.js**](file:///d:/edwinspire/OtrosProyectos/OBDII_cli/src/index.js): Bucle interactivo de la interfaz CLI, menús de usuario y presentación de datos con colores ANSI.
-  - 📄 [**elm327.js**](file:///d:/edwinspire/OtrosProyectos/OBDII_cli/src/elm327.js): Motor del protocolo ELM327. Administra colas de comandos, buffers de lectura de puerto serie, reinicios y rutinas de auto-recuperación.
-  - 📄 [**bluetooth.js**](file:///d:/edwinspire/OtrosProyectos/OBDII_cli/src/bluetooth.js): Módulo de comunicación física; envuelve a la biblioteca `serialport` para buscar y abrir conexiones.
-  - 📄 [**ecu-profiles.js**](file:///d:/edwinspire/OtrosProyectos/OBDII_cli/src/ecu-profiles.js): Contiene la configuración de perfiles (como la ECU SIM2K-33) y las fórmulas de decodificación de bloques de datos KWP.
-  - 📄 [**obd2-commands.js**](file:///d:/edwinspire/OtrosProyectos/OBDII_cli/src/obd2-commands.js): Definición de comandos estándar OBD2, PIDs y sus respectivas ecuaciones de conversión.
-  - 📄 [**dtc-database.js**](file:///d:/edwinspire/OtrosProyectos/OBDII_cli/src/dtc-database.js): Base de datos de códigos de diagnóstico y la plantilla generadora del reporte visual HTML en español.
+- 📄 [**index.js**](index.js): punto de entrada de compatibilidad; `npm start` desde la raíz sigue abriendo la consola.
+- 📁 **packages/core/** (`@obdii/core`): núcleo sin dependencias de Node ni del navegador.
+  - 📄 [**elm327.js**](packages/core/src/elm327.js): motor del protocolo ELM327 / KWP2000. Cola de comandos, desentramado KWP con checksum, reinicios y auto-recuperación. Recibe un *transporte* (la forma de conectarse al adaptador) y un *logger* opcional.
+  - 📄 [**ecu-profiles.js**](packages/core/src/ecu-profiles.js): perfiles de ECU (como la SIM2K-33) y fórmulas de decodificación de los bloques KWP.
+  - 📄 [**obd2-commands.js**](packages/core/src/obd2-commands.js): comandos OBD2 estándar, PIDs y sus fórmulas de conversión.
+  - 📄 [**dtc-database.js**](packages/core/src/dtc-database.js): base de datos de códigos de error y plantilla del reporte HTML en español.
+  - 📁 [**test/**](packages/core/test/): pruebas con un ELM327 + ECU simulados a partir de capturas reales del vehículo (`npm test`).
+- 📁 **packages/serial-node/** (`@obdii/serial-node`): transporte para Node.js con `serialport` (puerto COM / Bluetooth SPP). Lo usan la consola y el futuro servidor web.
+- 📁 **apps/cli/** (`@obdii/cli`): la aplicación de consola.
+  - 📄 [**src/index.js**](apps/cli/src/index.js): menús interactivos, monitor en tiempo real, CSV y presentación con colores ANSI.
 
 ---
 
@@ -66,6 +68,12 @@ El código está estructurado de manera modular y limpia:
 2. Instala las dependencias necesarias:
    ```bash
    npm install
+   ```
+   Desde la raíz instala todos los proyectos del monorepo y enlaza `@obdii/core` y `@obdii/serial-node`.
+
+3. (Opcional) Ejecuta las pruebas del núcleo, que no necesitan el auto:
+   ```bash
+   npm test
    ```
 
 ---
@@ -110,7 +118,7 @@ El código está estructurado de manera modular y limpia:
 ### El problema de los clones ELM327 v1.5
 Con las cabeceras desactivadas (`ATH0`), los clones v1.5 **truncan las respuestas KWP que ocupan varias líneas**: al quitar las cabeceras de cada línea descartan también bytes de datos. Por eso el bloque `21 01` parecía tener longitud variable (9–35 bytes) y la respuesta del Servicio 18 perdía códigos de error.
 
-La solución es trabajar con `ATH1` y desentramar nosotros cada mensaje ISO 14230 (`formato, destino, origen, [longitud], datos…, checksum`), validando el checksum. Con eso el bloque `21 01` mide siempre **78 bytes** y cada valor tiene una posición fija (ver `src/ecu-profiles.js`, donde está documentado cómo se calibró cada campo).
+La solución es trabajar con `ATH1` y desentramar nosotros cada mensaje ISO 14230 (`formato, destino, origen, [longitud], datos…, checksum`), validando el checksum. Con eso el bloque `21 01` mide siempre **78 bytes** y cada valor tiene una posición fija (ver `packages/core/src/ecu-profiles.js`, donde está documentado cómo se calibró cada campo).
 
 ### Sesión KWP y `BUS INIT: ERROR`
 La ECU mantiene la sesión de diagnóstico abierta hasta que pasan ~5 s **sin tráfico** en la línea K. Si el ELM327 se reinicia (`ATZ`, cierre brusco de la app, corte del Bluetooth) mientras la sesión sigue abierta, todas las inicializaciones devuelven `BUS INIT: ERROR`, y reintentar de inmediato mantiene ocupado el bus, así que la ECU nunca cierra la sesión. La app espera 6 s en silencio antes de reintentar. Con el contacto apagado la ECU no responde a nada.

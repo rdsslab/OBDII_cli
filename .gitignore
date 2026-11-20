@@ -1,0 +1,4 @@
+node_modules/
+# Session outputs written by the apps
+live_*.csv
+dtc_report_*.html

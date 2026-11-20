@@ -1,13 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * OBD2 ELM327 Bluetooth Scanner
- * Entry point
+ * Compatibility entry point: `node index.js` / `npm start` from the repo root
+ * keep launching the terminal app (now in apps/cli). Reports and CSV files
+ * are still written to the current directory.
  */
 
-import { main } from './src/index.js';
-
-main().catch((err) => {
-    console.error('Fatal error:', err);
-    process.exit(1);
-});
+import './apps/cli/index.js';

@@ -1,15 +1,18 @@
 {
-  "name": "obd2-elm327-bluetooth",
+  "name": "obdii-monorepo",
   "version": "1.0.0",
-  "description": "Node.js Bluetooth OBD2 application for ELM327 devices",
-  "main": "index.js",
+  "description": "ELM327 OBD2 / KWP2000 diagnostics: shared core plus terminal, web server, PWA and Android apps",
   "type": "module",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "cli": "npm start -w @obdii/cli",
+    "test": "npm test --workspaces --if-present"
   },
   "author": "edwinspire",
-  "license": "ISC",
-  "dependencies": {
-    "serialport": "^12.0.0"
-  }
+  "license": "ISC"
 }

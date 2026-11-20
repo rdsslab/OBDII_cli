@@ -1,0 +1,19 @@
+{
+  "name": "@obdii/cli",
+  "version": "1.0.0",
+  "description": "Interactive terminal app for ELM327 OBD2 / KWP2000 diagnostics",
+  "type": "module",
+  "private": true,
+  "main": "index.js",
+  "bin": {
+    "obdii-cli": "index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@obdii/core": "1.0.0",
+    "@obdii/serial-node": "1.0.0"
+  },
+  "license": "ISC"
+}

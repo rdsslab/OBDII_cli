@@ -2,8 +2,14 @@
 
 Plan para llevar la aplicación de consola actual a otras plataformas (servidor web en la laptop, PWA y app Android) sin rehacer el protocolo, que es la parte ya probada con el vehículo (ver [ECU_SIM2K-33.md](ECU_SIM2K-33.md)).
 
-- **Estado:** propuesta, nada implementado todavía.
+- **Estado:** paso 1 (monorepo + núcleo + consola) implementado el 2026-11-20; el resto, pendiente.
 - **Fecha:** 2026-11-20.
+
+### Decisiones tomadas (2026-11-20)
+- **Un solo repositorio** con proyectos separados (*npm workspaces*), paquetes con el prefijo `@obdii/`.
+- **`obd-server`: aplicación web normal, no PWA.** Varios usuarios conectados a la vez desde la red local, por `http://`. No necesita HTTPS ni instalación.
+- **`obd-pwa`: publicada en GitHub Pages** (HTTPS gratis), instalable desde Chrome.
+- **`obd-android`: al final.** Android Studio se instala cuando se llegue a ese paso.
 
 ---
 
@@ -37,8 +43,8 @@ Separar el código en un **núcleo (core)** independiente de la plataforma y en 
 |---|---|---|
 | `obd-core` | `elm327.js`, `ecu-profiles.js`, `obd2-commands.js`, `dtc-database.js` | ninguno: recibe uno por parámetro |
 | `obd-cli` | la consola actual (`index.js`), registro CSV | `serialport` (COM6) |
-| `obd-server` | servidor HTTP + WebSocket en la laptop | `serialport` (COM6) |
-| `obd-pwa` | la interfaz publicada en HTTPS, instalable | Web Serial (Chrome) |
+| `obd-server` | servidor HTTP + WebSocket en la laptop (aplicación web, no PWA) | `serialport` (COM6) |
+| `obd-pwa` | la interfaz publicada en GitHub Pages, instalable | Web Serial (Chrome) |
 | `obd-android` | la interfaz empaquetada como APK (teléfono y radio del auto) | plugin nativo Bluetooth SPP (y USB opcional) |
 | `obd-ui` | pantallas web compartidas: DTCs, tablero en tiempo real, ECU, exportación | ninguno: habla con el core o con el servidor |
 | `obd-esp32` | firmware + hardware propio conectado al OBD2, **sin ELM327**; sirve `obd-ui` por Wi-Fi | línea K directa (transceptor L9637D / SN65HVDA195), expuesta por WebSocket |
@@ -124,11 +130,11 @@ La laptop se conecta al ELM327 y publica la interfaz en la red local (p. ej. `ht
 | Usa la conexión ya probada (COM6), sin riesgo para el protocolo | La laptop tiene que ir en el auto, encendida |
 | Funciona en cualquier navegador: Android, iPhone, Firefox, el radio, una tablet | Necesita una red común: hotspot de la laptop o del teléfono |
 | Varias pantallas a la vez | Cualquiera en la red podría borrar DTCs: hace falta un PIN para escrituras y modo solo lectura para los demás |
-| CSV y reportes quedan en la laptop | Por `http://` en la red local no se instala como PWA completa (requiere HTTPS) |
+| CSV y reportes quedan en la laptop | Por `http://` no se instala como PWA; no hace falta, porque se decidió que sea una aplicación web normal |
 | Se puede probar con el auto desde la laptop de desarrollo | Hay que definir quién tiene el control cuando varios piden comandos |
 
 ### 4.3 `obd-pwa`: app web instalable (Chrome Android con Web Serial)
-La interfaz publicada en HTTPS (p. ej. GitHub Pages) que se conecta directo al ELM327 emparejado en el teléfono.
+La interfaz publicada en GitHub Pages (HTTPS) que se conecta directo al ELM327 emparejado en el teléfono.
 
 | Pros | Contras |
 |---|---|
@@ -242,7 +248,11 @@ Con la opción B, el núcleo necesita un transporte "KWP crudo" además del de c
 
 ## 5. Orden propuesto
 
-1. **Core.** Crear el monorepo y mover el núcleo a `packages/core` con el contrato de transporte, y `index.js` a `apps/cli`.
+1. ✅ **Core (2026-11-20).** Monorepo creado:
+   - núcleo en `packages/core` (`@obdii/core`), con el contrato de transporte y un logger inyectable;
+   - transporte Node en `packages/serial-node` (`@obdii/serial-node`);
+   - consola en `apps/cli`;
+   - transporte simulado y pruebas en `packages/core/test` (`npm test`).
    - **Criterio de aceptación:** la consola se comporta igual que hoy, probada con el auto (DTCs, opción 20, info de la ECU).
    - Añadir el transporte simulado con respuestas grabadas para pruebas sin el vehículo.
 2. **`obd-ui` + `obd-server`.** Funciona con lo ya probado y deja lista la interfaz para el resto.

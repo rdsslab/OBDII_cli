@@ -1,6 +1,6 @@
 # ECU Siemens VDO SIM2K-33 (SAIC Wuling 2008): notas técnicas
 
-Todo lo que se sabe de esta ECU a partir de pruebas reales con un ELM327 v1.5 (Bluetooth, COM6) y el perfil `SIM2K_33` de [src/ecu-profiles.js](../src/ecu-profiles.js). Sirve para retomar la investigación y completar lo que falta.
+Todo lo que se sabe de esta ECU a partir de pruebas reales con un ELM327 v1.5 (Bluetooth, COM6) y el perfil `SIM2K_33` de [ecu-profiles.js](../packages/core/src/ecu-profiles.js). Sirve para retomar la investigación y completar lo que falta.
 
 - **Protocolo:** ISO 14230-4 KWP2000, fast init (`ATSP5`), cabecera `81 11 F1` (tester `F1` → ECU `11`).
 - **Fecha de las pruebas:** 2026-11-19.
@@ -39,7 +39,7 @@ La ECU publica su propio directorio en `1A 81`: entradas `[longitud][id][escala�
 | `10 89` | NRC `22` |
 | `18 00 FF 00` / `18 02 FF 00` | ✔ DTCs con estado (KWP statusOfDTC) |
 | `13`, `17` | NRC `11` / `12`: no soportados |
-| `21 01`, `21 02` | ✔ bloques de 78 bytes de datos (ver [src/ecu-profiles.js](../src/ecu-profiles.js)) |
+| `21 01`, `21 02` | ✔ bloques de 78 bytes de datos (ver [ecu-profiles.js](../packages/core/src/ecu-profiles.js)) |
 | `21 F0` | existe; NRC `22` en sesión 81, NRC `80` en sesión 85 |
 | `21 03` y demás `21 xx` | NRC `12` |
 | `12` (freeze frame) | todos los formatos probados → NRC `12` / `79` / `11` |
@@ -118,7 +118,7 @@ Activar salidas (parámetros `05`/`06`/`07`/`08`) queda pendiente hasta conocer 
 
 ## 4. Datos en vivo: lo que falta
 
-Detalle de cada campo y su calibración: [src/ecu-profiles.js](../src/ecu-profiles.js).
+Detalle de cada campo y su calibración: [ecu-profiles.js](../packages/core/src/ecu-profiles.js).
 
 - **Velocidad del vehículo** (`2101`, byte de datos 18): la relación con las marchas encaja, pero lee menos que el velocímetro y salta de forma errática, en línea con **P0501**. Escala sin confirmar.
 - **Nivel de combustible:** no aparece en `2101`/`2102` y no hay OBD2. Comparar los bytes crudos del CSV de la opción 20 antes y después de cargar combustible.
@@ -135,7 +135,7 @@ Detalle de cada campo y su calibración: [src/ecu-profiles.js](../src/ecu-profil
 | P0501 | Sensor de velocidad del vehículo, rango/funcionamiento | memorizado; señal de velocidad errática en los datos en vivo |
 | P0335 | Sensor de posición del cigüeñal, circuito | memorizado |
 
-Fuente de P1535/P1536/P1545: tabla Wuling "五菱汽车故障码大全" (360doc), citada en [src/dtc-database.js](../src/dtc-database.js).
+Fuente de P1535/P1536/P1545: tabla Wuling "五菱汽车故障码大全" (360doc), citada en [dtc-database.js](../packages/core/src/dtc-database.js).
 
 ---
 
