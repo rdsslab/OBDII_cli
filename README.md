@@ -120,6 +120,12 @@ Los códigos `P15xx` dependen del fabricante. La base de datos incluye las defin
 
 ---
 
+## 📚 Documentación técnica
+
+- [docs/ECU_SIM2K-33.md](docs/ECU_SIM2K-33.md): identificación de la ECU, servicios soportados (lectura y escritura), los 29 actuadores del servicio `30` con su función probable, plan de verificación y pendientes de investigación.
+
+---
+
 ## 📄 Licencia
 
 Este proyecto está bajo la Licencia ISC. Consúltalo en el archivo `package.json` para obtener más información.
