@@ -14,6 +14,7 @@ import { ECU_ID_SUBFUNCTIONS, ECU_ID_NAMES, KWP_DATA_BLOCKS } from './ecu-profil
 
 const TIMEOUT_MS = 6000;
 const INIT_TIMEOUT_MS = 12000;
+const DRAIN_MS = 1500;              // max wait for a late answer after a timeout
 
 /**
  * K-line ECUs keep a diagnostic session open until P3max (~5 s) elapses
@@ -473,7 +474,10 @@ export class ELM327 {
         return p;
     }
 
-    _sendRawNow(command, timeout) {
+    async _sendRawNow(command, timeout) {
+        // A previous command timed out: its late answer must not be taken as
+        // the answer to this one (it would shift every response by one).
+        if (this._drain) await this._drain;
         return new Promise((resolve) => {
             if (!this.port) {
                 resolve('ERROR: Not connected');
@@ -518,6 +522,7 @@ export class ELM327 {
                 const response = buffer.replace(/>/g, '').trim();
                 this._debug('TX', command);
                 this._debug('RX (timeout)', response || '(empty)');
+                this._startDrain();
                 finish(response || 'TIMEOUT');
             }, timeout);
 
@@ -527,6 +532,30 @@ export class ELM327 {
                 this.port?.offData(onData);
                 finish(`ERROR: ${err.message}`);
             });
+        });
+    }
+
+    /**
+     * After a timeout, swallow whatever is still on its way until the '>'
+     * prompt (or DRAIN_MS of nothing), so the next command starts clean.
+     */
+    _startDrain() {
+        const port = this.port;
+        if (!port || this._drain) return;
+        const dec = new TextDecoder();
+        let junk = '';
+        this._drain = new Promise((resolve) => {
+            const end = () => { port.offData(on); clearTimeout(t); resolve(); };
+            const on = (chunk) => {
+                const s = typeof chunk === 'string' ? chunk : dec.decode(chunk, { stream: true });
+                junk += s;
+                if (s.includes('>')) end();
+            };
+            const t = setTimeout(end, DRAIN_MS);
+            port.onData(on);
+        }).then(() => {
+            this._drain = null;
+            if (junk.trim()) this._warn(`Respuesta atrasada descartada: ${junk.replace(/[\r\n>]+/g, ' ').trim().slice(0, 80)}`);
         });
     }
 
@@ -739,10 +768,18 @@ export class ELM327 {
      */
     async readKWPParsedBlock(blockDef) {
         const result = await this.readKWPDataBlock(blockDef.id);
-        if (!result.success) return [];
+        if (!result.success) {
+            const why = String(result.error || result.raw || 'sin datos').replace(/\s+/g, ' ').trim();
+            this.lastBlockError = why.length > 90 ? `${why.slice(0, 90)}…` : why;
+            return [];
+        }
 
         // Fixed-position layout: a different length means a different layout.
-        if (blockDef.length && result.bytes.length !== blockDef.length) return [];
+        if (blockDef.length && result.bytes.length !== blockDef.length) {
+            this.lastBlockError = `longitud ${result.bytes.length} bytes (se esperaban ${blockDef.length}): respuesta incompleta`;
+            return [];
+        }
+        this.lastBlockError = null;
 
         const parsed = [];
         // Raw data bytes (hex, no "61 xx" prefix) for logging / later calibration

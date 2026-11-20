@@ -79,7 +79,7 @@ export function startAlerts(client, { toast, onLog } = {}) {
         .on('dtcs', (d) => engine.notify('dtcs', d?.dtcs || []))
         .on('ecu-link', (l) => engine.notify(l.ok ? 'link-ok' : 'link-lost', null, l.t))
         .on('state', (s) => {
-            if (lastStatus === 'connected' && s.status === 'error') engine.notify('link-lost');
+            if (lastStatus === 'connected' && (s.status === 'error' || s.status === 'reconnecting')) engine.notify('link-lost');
             if (s.status === 'connected' && lastStatus !== 'connected') engine.notify('link-ok');
             if (s.status === 'disconnected') engine.reset();
             lastStatus = s.status;

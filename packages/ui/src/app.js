@@ -13,7 +13,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<'
 const fmt = (v) => typeof v === 'number' ? (Number.isInteger(v) ? String(v) : v.toFixed(1)) : String(v ?? '—');
 const timeStr = (t) => new Date(t).toLocaleTimeString();
 
-const STATUS_TEXT = { disconnected: 'Desconectado', connecting: 'Conectando…', connected: 'Conectado', watch: 'Vigilando batería', error: 'Error', offline: 'Sin servidor' };
+const STATUS_TEXT = { disconnected: 'Desconectado', connecting: 'Conectando…', connected: 'Conectado', watch: 'Vigilando batería', reconnecting: 'Reconectando…', error: 'Error', offline: 'Sin servidor' };
 const MODE_TEXT = { kwp2000: 'KWP2000 (ISO 14230)', obd2: 'OBD2 estándar', unknown: 'sin respuesta' };
 
 export function startApp(client) {
@@ -73,20 +73,26 @@ export function startApp(client) {
         $('viewers').hidden = !state.clients;
         $('viewers').textContent = `${state.clients} ${state.clients === 1 ? 'dispositivo' : 'dispositivos'}`;
 
-        $('sStatus').textContent = STATUS_TEXT[state.status] || '—';
+        const rc = state.reconnect;
+        $('sStatus').textContent = state.status === 'reconnecting' && rc
+            ? `Reconectando automáticamente (intento ${rc.attempt}${rc.nextAt ? `, en ${Math.max(0, Math.round((rc.nextAt - Date.now()) / 1000))} s` : ', probando…'})`
+            : STATUS_TEXT[state.status] || '—';
         $('sPort').textContent = state.port || '—';
         $('sVersion').textContent = state.version || '—';
         $('sMode').textContent = MODE_TEXT[state.mode] || '—';
         $('sProfile').textContent = state.profile || '—';
         $('sVolt').textContent = state.voltage != null ? `${state.voltage} V` : '—';
         $('connError').hidden = !state.error;
-        $('connError').textContent = state.error || '';
+        $('connError').textContent = state.status === 'reconnecting'
+            ? `${state.error || 'Se perdió la conexión'}. Reintentando solo; «Desconectar» lo cancela.`
+            : state.error || '';
 
         const watching = state.status === 'watch';
-        $('connect').disabled = busy || connected || watching || state.status === 'connecting' || !$('port').value;
-        $('disconnect').disabled = busy || !(connected || watching || state.status === 'error');
+        const reconnecting = state.status === 'reconnecting';
+        $('connect').disabled = busy || connected || watching || reconnecting || state.status === 'connecting' || !$('port').value;
+        $('disconnect').disabled = busy || !(connected || watching || reconnecting || state.status === 'error');
         $('watchBattery').hidden = typeof client.watchBattery !== 'function';
-        $('watchBattery').disabled = busy || connected || watching || state.status === 'connecting' || !$('port').value;
+        $('watchBattery').disabled = busy || connected || watching || reconnecting || state.status === 'connecting' || !$('port').value;
         $('readDtc').disabled = busy || !connected;
         const canClear = !!state.clearEnabled && typeof client.clearDtcs === 'function';
         $('clearDtc').hidden = !canClear;
@@ -177,7 +183,17 @@ export function startApp(client) {
         return el;
     }
 
+    let lastLiveAt = 0;
+    setInterval(() => {
+        const running = state.live?.running || state.status === 'reconnecting';
+        const age = Date.now() - lastLiveAt;
+        const stale = !!lastLiveAt && running && age > 4000 && state.status !== 'watch';
+        $('liveGrid').classList.toggle('stale', stale);
+        if (stale) $('liveInfo').textContent = `Sin datos nuevos hace ${Math.round(age / 1000)} s · ${state.status === 'reconnecting' ? 'reconectando' : 'recuperando la comunicación'}…`;
+    }, 1000);
+
     function onLive(sample) {
+        lastLiveAt = Date.now();
         $('liveEmpty').hidden = true;
         for (const f of sample.fields) {
             const el = tileFor(f);

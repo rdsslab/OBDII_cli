@@ -58,11 +58,17 @@ export class WebSerialTransport {
     }
 
     async open() {
+        const opts = { baudRate: this.baudRate, dataBits: 8, stopBits: 1, parity: 'none' };
         try {
-            await this.port.open({ baudRate: this.baudRate, dataBits: 8, stopBits: 1, parity: 'none' });
+            await this.port.open(opts);
         } catch (err) {
-            // Already open (e.g. re-open during recovery) is fine.
             if (!/already open/i.test(err.message)) throw new Error(`No se pudo abrir el adaptador: ${err.message}`);
+            // Left open by a previous transport (e.g. after a Bluetooth drop):
+            // a stale open port has no readable stream, so close and re-open it.
+            if (!this.port.readable || !this.port.writable) {
+                try { await this.port.close(); } catch { /* ignore */ }
+                try { await this.port.open(opts); } catch (e2) { throw new Error(`No se pudo abrir el adaptador: ${e2.message}`); }
+            }
         }
         this.isOpen = true;
         this._closing = false;

@@ -18,7 +18,7 @@ class FakeSerialPort extends EventTarget {
     }
     getInfo() { return { bluetoothServiceClassId: '00001101-0000-1000-8000-00805f9b34fb' }; }
     async open({ baudRate }) {
-        if (this.readable) throw new Error('The port is already open.');
+        if (this.readable || this.stale) throw new Error('The port is already open.');
         assert.equal(baudRate, 38400);
         this.opened++;
         this.sim ||= new SimTransport(this.simOpts);
@@ -32,6 +32,7 @@ class FakeSerialPort extends EventTarget {
         this.writable = new WritableStream({ write: (bytes) => this.sim.write(dec.decode(bytes)) });
     }
     async close() {
+        this.stale = false;
         this.sim?.offData(this._feed);
         try { this._ctrl.close(); } catch { /* ignore */ }
         this.readable = this.writable = null;
@@ -100,16 +101,30 @@ test('DirectClient over Web Serial: pick port, connect, live, DTCs, report, clea
     assert.equal(port.readable, null, 'port closed');
 });
 
-test('DirectClient: a dropped Bluetooth link puts the session in error', async () => {
+test('DirectClient: a dropped Bluetooth link reconnects by itself and resumes live data', { timeout: 30000 }, async () => {
     const port = new FakeSerialPort({});
     installNavigator(port);
     const { DirectClient } = await import('../src/clients/direct-client.js');
     const client = new DirectClient();
+    const statuses = [];
     let last;
-    client.on('state', s => { last = s; });
+    let samples = 0;
+    client.on('state', s => { last = s; statuses.push(s.status); }).on('live', () => samples++);
     await client.connect('new', 'SIM2K_33');
-    assert.equal(last.status, 'connected');
+    await client.startLive();
+    await until(() => samples >= 2);
+
+    // Android-like drop: the stream dies and the port stays "open" (stale)
+    // until someone closes it.
     port.drop();
-    await until(() => last.status === 'error');
+    port.stale = true;
+    await until(() => last.status === 'reconnecting');
     assert.match(last.error, /Se perdió la conexión/);
+    await until(() => last.status === 'connected' && last.live?.running, 20000);
+    const before = samples;
+    await until(() => samples > before + 2);
+    assert.ok(port.opened >= 2);
+    assert.ok(statuses.includes('reconnecting'));
+    await client.disconnect();
+    assert.equal(last.status, 'disconnected');
 });

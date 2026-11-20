@@ -62,7 +62,7 @@ button, select, input { font: inherit; color: inherit; }
 .pill, .chip { font-size: .8rem; padding: 3px 10px; border-radius: 999px; background: var(--surface-2); white-space: nowrap; }
 .pill::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--muted); vertical-align: 1px; }
 .pill[data-status="connected"]::before { background: var(--ok); }
-.pill[data-status="connecting"]::before { background: var(--warn); animation: blink 1s infinite; }
+.pill[data-status="connecting"]::before, .pill[data-status="reconnecting"]::before { background: var(--warn); animation: blink 1s infinite; }
 .pill[data-status="error"]::before, .pill[data-status="offline"]::before { background: var(--bad); }
 @keyframes blink { 50% { opacity: .3; } }
 
@@ -129,6 +129,7 @@ dialog .actions { justify-content: flex-end; }
   .tile { padding: 10px 12px; }
   .tile .value { font-size: 1.45rem; }
 }
+.grid.stale .tile { opacity: .5; filter: grayscale(.6); transition: opacity .3s; }
 .tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); min-width: 0; }
 .tile .name { font-size: .78rem; color: var(--muted); display: flex; gap: 6px; align-items: baseline; justify-content: space-between; }
 .tile .badge { font-size: .65rem; padding: 1px 6px; border-radius: 6px; background: var(--surface-2); white-space: nowrap; }

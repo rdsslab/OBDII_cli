@@ -56,6 +56,7 @@ Monorepo con *npm workspaces*: un núcleo independiente de la plataforma y una a
 - 📁 **apps/pwa/** (`@obdii/pwa`): app web instalable (PWA) que se conecta directo al ELM327 con Web Serial; se publica en GitHub Pages.
 - 📁 **apps/cli/** (`@obdii/cli`): la aplicación de consola.
   - 📄 [**src/index.js**](apps/cli/src/index.js): menús interactivos, monitor en tiempo real, CSV y presentación con colores ANSI.
+- 📁 [**firmware/esp32-elm327/**](firmware/esp32-elm327/README.md): firmware PlatformIO para un ESP32 que crea su propia red Wi-Fi, se conecta al ELM327 por Bluetooth y sirve el panel con usuario y clave (fase 1: comunicación). Simulador sin placa: `npm run esp32:mock`.
 
 ---
 
@@ -187,6 +188,11 @@ Funcionan igual en el servidor web y en la PWA. En la pestaña **Ajustes** se co
 - **Pantalla encendida:** se mantiene encendida durante el tiempo real.
 - **Activar el sonido:** el navegador solo permite sonido después de tocar la página una vez.
 - **Voces:** las genera `node tools/generate-voices.mjs` con las voces de Windows (Helena, es-ES; Zira, en-US). Los textos están en `packages/ui/src/sounds/phrases.js`. Para usar grabaciones propias, reemplaza los WAV conservando los nombres.
+
+### Reconexión automática
+Si se pierde el enlace (Bluetooth caído, adaptador desenchufado, teléfono que suspendió la app), la sesión pasa a **Reconectando…** y reintenta sola a los 2, 4, 8 y 15 s y luego cada 30 s, hasta 30 min. Al reconectar retoma el tiempo real o la vigilancia de batería. En la PWA también reintenta en cuanto la app vuelve a primer plano. **Desconectar** cancela los reintentos. Antes de llegar ahí, el tiempo real se recupera por pasos: tras 3 lecturas fallidas comprueba el adaptador (`ATRV`) y reintenta sin reiniciar; si sigue fallando, reabre la sesión KWP, luego reinicia el ELM327 y luego reabre el puerto; solo entonces pasa a la reconexión completa. La alerta «Comunicación perdida» aparece a partir del segundo paso y se despeja sola cuando vuelven los datos. Mientras no llegan datos, las tarjetas se ven atenuadas con «Sin datos nuevos hace N s». El registro indica por qué falló cada lectura (NO DATA, respuesta incompleta…), y una respuesta que llega tarde se descarta para que no se mezcle con la siguiente.
+
+El voltaje junto a «Conectado» es el que mide el ELM327 (`ATRV`) y se relee cada 15 s durante el tiempo real; el de la tarjeta «Battery Voltage (ECU)» lo informa la ECU y puede diferir unas décimas.
 
 ### Vigilar batería
 El botón **Vigilar batería (contacto apagado)** de la pestaña Conexión mide solo el voltaje con el ELM327 (`ATRV`) cada 30 s, sin hablar con la ECU, y activa la alerta de batería baja. Sirve, por ejemplo, para vigilar una batería débil o luces olvidadas mientras estás cerca. El ELM327 conectado también consume batería.

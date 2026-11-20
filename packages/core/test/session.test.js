@@ -61,8 +61,8 @@ test('session: hung adapter during live data recovers by escalating to ATZ', { t
     await session.disconnect();
 });
 
-test('session: linkLost() puts the session in error and stops live data', async () => {
-    const session = new ObdSession({ makeTransport: () => new SimTransport() });
+test('session: linkLost() without autoReconnect puts the session in error and stops live data', async () => {
+    const session = new ObdSession({ makeTransport: () => new SimTransport(), autoReconnect: false });
     await session.connect('SIM', 'SIM2K_33');
     await session.startLive();
     await session.linkLost('Adaptador desconectado');
@@ -93,4 +93,124 @@ test('session: battery watch reads ATRV without the ECU, then disconnects', asyn
     await assert.rejects(() => session.connect('SIM', 'SIM2K_33'), /Ya conectado/);
     await session.disconnect();
     assert.equal(session.state.status, 'disconnected');
+});
+
+test('session: link loss reconnects by itself and resumes live data', { timeout: 30000 }, async () => {
+    let opens = 0;
+    // the adapter is "away" for the first two reconnect attempts
+    const makeTransport = () => {
+        opens++;
+        if (opens === 2 || opens === 3) return { open: async () => { throw new Error('No se pudo abrir el adaptador'); }, close: async () => {}, onData() {}, offData() {}, write() {}, isOpen: false };
+        return new SimTransport();
+    };
+    const session = new ObdSession({ makeTransport, reconnectDelaysMs: [50, 100] });
+    const states = [];
+    const links = [];
+    let samples = 0;
+    session.on('state', s => states.push(s.status)).on('ecu-link', l => links.push(l.ok)).on('live', () => samples++);
+    await session.connect('SIM', 'SIM2K_33');
+    await session.startLive();
+    await until(() => samples > 2);
+
+    session.linkLost('Bluetooth perdido');
+    await until(() => session.state.status === 'reconnecting');
+    assert.equal(session.state.live.running, false);
+    await until(() => session.state.status === 'connected' && session.state.live.running, 25000);
+    assert.equal(opens, 4, 'two failed attempts, then success');
+    assert.equal(session.state.reconnect, null);
+    const before = samples;
+    await until(() => samples > before + 2);
+    assert.deepEqual(links.slice(-2), [false, true]);
+    assert.ok(states.includes('reconnecting'));
+    await session.disconnect();
+});
+
+test('session: disconnect() cancels the automatic reconnection', { timeout: 15000 }, async () => {
+    let opens = 0;
+    const session = new ObdSession({
+        makeTransport: () => (++opens === 1 ? new SimTransport() : { open: async () => { throw new Error('ausente'); }, close: async () => {}, onData() {}, offData() {}, write() {}, isOpen: false }),
+        reconnectDelaysMs: [30],
+    });
+    await session.connect('SIM', 'SIM2K_33');
+    session.linkLost('Bluetooth perdido');
+    await until(() => opens >= 3);
+    await session.disconnect();
+    const n = opens;
+    await new Promise(r => setTimeout(r, 300));
+    assert.equal(session.state.status, 'disconnected');
+    assert.equal(opens, n, 'no more attempts after disconnect');
+});
+
+test('session: gives up after reconnectMaxMs with a clear error', { timeout: 15000 }, async () => {
+    let opens = 0;
+    const session = new ObdSession({
+        makeTransport: () => (++opens === 1 ? new SimTransport() : { open: async () => { throw new Error('ausente'); }, close: async () => {}, onData() {}, offData() {}, write() {}, isOpen: false }),
+        reconnectDelaysMs: [40], reconnectMaxMs: 300,
+    });
+    await session.connect('SIM', 'SIM2K_33');
+    await session.linkLost('Bluetooth perdido');
+    assert.equal(session.state.status, 'error');
+    assert.match(session.state.error, /No se pudo reconectar/);
+});
+
+test('session: battery watch resumes after a link loss', { timeout: 15000 }, async () => {
+    const session = new ObdSession({ makeTransport: () => new SimTransport({ engineOff: true }), batteryWatchMs: 100, reconnectDelaysMs: [50] });
+    await session.watchBattery('SIM-OFF');
+    assert.equal(session.state.status, 'watch');
+    session.linkLost('Bluetooth perdido');
+    await until(() => session.state.status === 'reconnecting');
+    await until(() => session.state.status === 'watch');
+    let v = 0;
+    session.on('live', () => v++);
+    await until(() => v >= 1);
+    await session.disconnect();
+    assert.equal(session.state.status, 'disconnected');
+});
+
+/** Simulator whose Nth answer to 2101 arrives after the ELM timeout (slow Bluetooth). */
+class LateSim extends SimTransport {
+    constructor(lateAt, delayMs, opts) { super(opts); this.lateAt = lateAt; this.delayMs = delayMs; this.reads = 0; }
+    write(text) {
+        const cmd = text.replace(/\r/g, '').trim().toUpperCase();
+        if (cmd === '2101' && ++this.reads === this.lateAt) {
+            const reply = this._reply(cmd);
+            const bytes = new TextEncoder().encode(`${reply}\r\r>`);
+            setTimeout(() => this.listeners.forEach(cb => cb(bytes)), this.delayMs);
+            return;
+        }
+        super.write(text);
+    }
+}
+
+test('session: a late answer is discarded instead of shifting the next responses', { timeout: 30000 }, async () => {
+    const session = new ObdSession({ makeTransport: () => new LateSim(4, 6500, { engineOff: true }), dtcPollMs: 0 });
+    const logs = [];
+    const links = [];
+    const live = [];
+    session.on('log', e => logs.push(e)).on('ecu-link', l => links.push(l.ok)).on('live', s => live.push(s));
+    await session.connect('SIM-OFF', 'SIM2K_33');
+    await session.startLive();
+    await until(() => logs.some(e => /Respuesta atrasada descartada/.test(e.msg)), 20000);
+    const n = live.length;
+    await until(() => live.length >= n + 3);
+    // responses are in step again: the DTC read gets DTCs, not a 21 01 block
+    await session.stopLive();
+    const d = await session.readDtcs();
+    assert.deepEqual(d.dtcs.map(x => x.code), ['P1535', 'P0501', 'P0335']);
+    assert.ok(logs.some(e => /Lectura en tiempo real fallida/.test(e.msg)), 'failure reason logged');
+    assert.deepEqual(links, [], 'one slow answer is not a lost link');
+    await session.disconnect();
+});
+
+test('session: battery voltage (ATRV) is refreshed during live data', { timeout: 15000 }, async () => {
+    const sim = new SimTransport({ engineOff: true });
+    const session = new ObdSession({ makeTransport: () => sim, liveVoltageMs: 300, dtcPollMs: 0 });
+    await session.connect('SIM-OFF', 'SIM2K_33');
+    assert.equal(session.state.voltage, 12.3);
+    sim.responses.ATRV = '12.9V';
+    const orig = sim._reply.bind(sim);
+    sim._reply = (c) => (c.toUpperCase().replace(/\s/g, '') === 'ATRV' ? '12.9V' : orig(c));
+    await session.startLive();
+    await until(() => session.state.voltage === 12.9);
+    await session.disconnect();
 });

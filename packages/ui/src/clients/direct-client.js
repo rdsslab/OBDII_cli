@@ -22,7 +22,8 @@ export class DirectClient {
             makeTransport: (port) => {
                 const t = new WebSerialTransport(port);
                 t.onClose(() => {
-                    if (this.session.state.status === 'connected') {
+                    const st = this.session.state.status;
+                    if (st === 'connected' || st === 'watch') {
                         this.session.linkLost('Se perdió la conexión con el adaptador (Bluetooth o USB)');
                     }
                 });
@@ -34,9 +35,20 @@ export class DirectClient {
         this.session.on('state', () => this._emit('state', this._state()));
         if (isWebSerialSupported()) {
             navigator.serial.addEventListener('disconnect', (e) => {
-                if (e.target === this.session.portRef && this.session.state.status === 'connected') {
+                const st = this.session.state.status;
+                if (e.target === this.session.portRef && (st === 'connected' || st === 'watch')) {
                     this.session.linkLost('El adaptador se desconectó');
                 }
+            });
+            // The adapter is back (Bluetooth re-linked): do not wait for the next retry.
+            navigator.serial.addEventListener('connect', (e) => {
+                if (e.target === this.session.portRef) this.session.reconnectNow();
+            });
+        }
+        if (typeof document !== 'undefined') {
+            // Android pauses the page in the background; retry as soon as it is visible again.
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible' && this.session.state.status === 'reconnecting') this.session.reconnectNow();
             });
         }
     }
