@@ -44,7 +44,11 @@ Monorepo con *npm workspaces*: un núcleo independiente de la plataforma y una a
   - 📄 [**obd2-commands.js**](packages/core/src/obd2-commands.js): comandos OBD2 estándar, PIDs y sus fórmulas de conversión.
   - 📄 [**dtc-database.js**](packages/core/src/dtc-database.js): base de datos de códigos de error y plantilla del reporte HTML en español.
   - 📁 [**test/**](packages/core/test/): pruebas con un ELM327 + ECU simulados a partir de capturas reales del vehículo (`npm test`).
-- 📁 **packages/serial-node/** (`@obdii/serial-node`): transporte para Node.js con `serialport` (puerto COM / Bluetooth SPP). Lo usan la consola y el futuro servidor web.
+  - 📄 [**diagnostics.js**](packages/core/src/diagnostics.js): lógica de alto nivel (DTCs con su explicación, muestreo en tiempo real, identificación de la ECU) que devuelve JSON; la usan el servidor web y, más adelante, la PWA y la app Android.
+  - 📄 [**sim-transport.js**](packages/core/src/sim-transport.js): ELM327 + ECU SIM2K-33 simulados con capturas reales, para pruebas y demostraciones sin el auto.
+- 📁 **packages/serial-node/** (`@obdii/serial-node`): transporte para Node.js con `serialport` (puerto COM / Bluetooth SPP). Lo usan la consola y el servidor web.
+- 📁 **packages/ui/** (`@obdii/ui`): interfaz web común, sin paso de compilación (HTML + CSS + JavaScript). Pantallas de conexión, tiempo real (con modo tablero), códigos, ECU y registro.
+- 📁 **apps/server/** (`@obdii/server`): servidor web local; se conecta al ELM327 y sirve la interfaz a todos los dispositivos de la red.
 - 📁 **apps/cli/** (`@obdii/cli`): la aplicación de consola.
   - 📄 [**src/index.js**](apps/cli/src/index.js): menús interactivos, monitor en tiempo real, CSV y presentación con colores ANSI.
 
@@ -90,6 +94,36 @@ Monorepo con *npm workspaces*: un núcleo independiente de la plataforma y una a
    - La aplicación detectará el protocolo del coche automáticamente.
    - Si la ECU requiere configuraciones especiales (como KWP2000), el motor intentará asociar un perfil predefinido o probará diferentes cabeceras físicas.
 5. **Menú Interactivo:** Utiliza las opciones numéricas del `0` al `20` para interactuar con los sistemas del vehículo.
+
+---
+
+## 🌐 Servidor web local (varios dispositivos a la vez)
+
+La laptop se conecta al ELM327 y publica una aplicación web en la red local. Teléfonos, tablets, otra PC o el navegador del radio del auto la abren al mismo tiempo y ven la misma sesión.
+
+```bash
+npm run server                      # elige el puerto desde la página
+npm run server -- --com COM6        # conecta al arrancar
+npm run server -- --sim             # agrega un puerto "SIM" para probar sin el auto
+npm run server -- --port 8080       # otro puerto HTTP (por defecto 3000)
+npm run server -- --pin 1234        # habilita «Borrar códigos» protegido con ese PIN
+```
+
+Al arrancar muestra las direcciones para abrir desde otros dispositivos (por ejemplo `http://192.168.1.20:3000`). Todos deben estar en la misma red: el Wi-Fi de casa o el hotspot de la laptop o del teléfono dentro del auto. Si otro dispositivo no puede abrir la página, permite Node.js en el firewall de Windows para redes privadas.
+
+**Funciones:**
+- **Conexión:** elegir puerto (marca el Bluetooth saliente como "probable ELM327") y perfil de ECU.
+- **Tiempo real:** el servidor lee la ECU **una sola vez** y envía cada muestra a todos los dispositivos (Server-Sent Events). Tarjetas con valor, barra y mín/máx. Las escalas sin confirmar llevan la marca "sin confirmar".
+  - **Modo tablero:** pocos valores en grande, pensado para el radio del auto. Se abre directo con `http://<ip>:3000/?tablero#live`.
+  - **Grabar CSV:** guarda las muestras en el dispositivo que lo pide, incluida la columna de bytes crudos.
+- **Códigos:** DTCs con su estado (presente/memorizado, MIL) y la explicación, causas y soluciones de la base de datos. Botón para abrir el reporte HTML.
+  - **Borrar códigos:** solo aparece si el servidor se inició con `--pin` (o la variable `OBD_PIN`). Pide confirmación y el PIN en cada borrado, se niega si el motor está en marcha y vuelve a leer los códigos después. Tras 5 PIN incorrectos se bloquea 60 s.
+- **ECU:** identificación del servicio `1A`.
+- **Registro:** mensajes de la conexión en vivo.
+
+**Escrituras en la ECU:** la única es «Borrar códigos» (servicio `14 FF 00` / OBD2 `04`), y solo con PIN. No hay funciones para reiniciar la ECU ni activar actuadores. Si se cae la conexión con la ECU durante el tiempo real, recupera la sesión sola (≈6 s de silencio en la línea K, igual que la consola). `Ctrl+C` cierra la sesión con la ECU (`82`) antes de salir.
+
+La pestaña inicial se puede elegir en la URL: `#conn`, `#live`, `#dtc`, `#ecu`, `#log`.
 
 ---
 

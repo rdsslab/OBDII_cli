@@ -58,7 +58,8 @@ Probado enviando **solo el byte de servicio**, sin parámetros, con el motor apa
 | `3B` writeDataByLocalIdentifier | `80` | existe solo en otra sesión |
 | `34` / `36` / `37` download / transfer | `80` | existen solo en sesión de programación (flash) |
 | `2E`, `2F`, `32`, `33`, `35` | `11` | no soportados |
-| `14` (borrar DTC), `11` (reset ECU) | — | **no probados** a propósito |
+| `14 FF 00` clearDiagnosticInformation | `54 FF 00` | ✔ **probado el 2026-11-20** con el motor apagado y el contacto en ON, en la sesión `81`. La lista quedó vacía de inmediato (ver §5) |
+| `11` (reset ECU) | — | **no probado** a propósito |
 
 Esta ECU usa el NRC `79` donde se esperaría `13` (longitud incorrecta).
 
@@ -122,7 +123,39 @@ Detalle de cada campo y su calibración: [ecu-profiles.js](../packages/core/src/
 
 - **Velocidad del vehículo** (`2101`, byte de datos 18): la relación con las marchas encaja, pero lee menos que el velocímetro y salta de forma errática, en línea con **P0501**. Escala sin confirmar.
 - **Nivel de combustible:** no aparece en `2101`/`2102` y no hay OBD2. Comparar los bytes crudos del CSV de la opción 20 antes y después de cargar combustible.
-- **Corrección de mezcla, inyección, valores por cilindro, temperatura del aire de admisión:** escalas sin confirmar.
+- **Corrección de mezcla, inyección, valores por cilindro:** escalas sin confirmar.
+- **Temperaturas en frío (2026-11-20, 06:15, ~14 h estacionado, a 2333 m de altitud):**
+
+  | Fuente | Valor |
+  |---|---|
+  | Aire exterior (Open-Meteo, 2333 m) | 14.0 °C (mínima de la noche 13.8 °C) |
+  | Refrigerante (byte 3) | 19.5 °C |
+  | Aire de admisión (byte 5) | 22.5 °C |
+
+  - **A las 07:04** (justo antes de arrancar): refrigerante 18.8 °C y admisión 21.8 °C, con el aire exterior a ~15 °C. El refrigerante **bajó** mientras el aire subía: el motor seguía soltando calor residual. La última conducción terminó a las 21:31 con 87 °C, ~8.7 h antes. El motor va bajo el asiento, expuesto al aire exterior.
+  - **Calentamiento del 2026-11-20 no registrado:** al arrancar (07:04:27) la comunicación se cortó y la recuperación ligera (reabrir la sesión KWP) falló 63 veces hasta que se apagó el motor. Probablemente la caída de voltaje del arranque reinició el ELM327 o cortó el Bluetooth. El servidor ahora escala la recuperación: sesión → `ATZ` + configuración completa → reabrir el puerto, y deja las trazas TX/RX en el registro.
+  - **Enfriamiento tras apagar** (ventilador a las 07:22:48, motor apagado ~07:23, contacto en ON):
+
+    | Hora | Refrigerante | Admisión | Byte 2 (crudo) |
+    |---|---|---|---|
+    | 07:34:40 | 79.5 °C | 66.0 °C | 68 |
+    | 07:35:20 | 78.8 °C | 66.0 °C | 68 |
+    | 07:36:51 | 77.3 °C | 66.8 °C | 70 |
+    | 07:38:23 | 76.5 °C | 67.5 °C | 71 |
+
+    - **Constante de tiempo (ley de enfriamiento de Newton, aire a ~15.5 °C):** τ ≈ 72 min (rango 54–109).
+    - **Calor residual a las 06:15:** con ese τ, tras 8.7 h quedarían < 1 °C. El refrigerante debería haber estado casi a la temperatura del aire (~14 °C), no a 19.5 °C.
+    - **Indicio de desfase en frío:** el sensor (o la fórmula) leería **~+3 a +5 °C** con el motor frío. Matiz: el enfriamiento real se frena cuando la diferencia es pequeña (convección natural, varias masas), y entre 06:15 y 07:04 el refrigerante bajó mientras el aire subía, así que algo de calor residual quedaba. No se corrige aún.
+    - **Al entrar el ventilador**, extrapolando hacia atrás: ~87–95 °C. Coherente con un umbral típico de ventilador, pero sin precisión suficiente para calibrar el extremo caliente.
+    - **El aire de admisión sube después de apagar** (66 → 67.5 °C): el colector absorbe calor del motor sin flujo de aire.
+  - Los dos sensores leen por encima del aire exterior con un margen parecido: el compartimento del motor estaba más caliente que afuera. **No se recalibró el refrigerante**: restarle 5.5 °C dejaría el ralentí en caliente en ~81 °C, por debajo de la apertura normal del termostato.
+  - **Aire de admisión corregido:** el byte 4 con `x − 40` daba 147 °C en frío. Siguiendo el mismo patrón que el refrigerante (byte 2 crudo / byte 3 temperatura), el byte 4 es el valor crudo del sensor y el **byte 5** la temperatura, con `0.75·x − 48`: 22.5 °C en frío y ~74 °C al ralentí en caliente (sensor en el colector, calentado). Sigue sin confirmar.
+  - **Para confirmar:** termómetro en el compartimento del motor junto al sensor, en frío, o una lectura tras una noche con el auto a la intemperie.
+- **MAP (bytes 13–14) pasa a "sin confirmar":** con el motor apagado marcó 93.6 kPa, pero la presión real en el lugar era **77.6 kPa** (Open-Meteo, superficie a 2333 m). La comprobación anterior ("93.8 kPa = presión atmosférica") suponía nivel del mar.
+  - El valor se comporta como un MAP (ralentí ~24–38, desaceleración ~18, techo ~92–93 con poca carga), pero `raw/100` no son kPa absolutos.
+  - Ninguna corrección simple encaja: escalar ×0.83 deja el ralentí en ~20 kPa (bajo para esta altura, se esperan ~30–37) y restar una cantidad fija lo deja en ~8 kPa.
+  - **Segundo punto, motor caliente y apagado (07:35):** raw 9395 → 94.0, con presión real ~77.9 kPa. Misma relación que en frío (×0.83; diferencia ~16 kPa): la lectura es estable y no depende de la temperatura, pero dos puntos tan cercanos no distinguen entre escala y desfase.
+  - **Próximo paso:** registro CSV con motor apagado → ralentí → acelerador a fondo, comparando con los 77–78 kPa conocidos.
 - **Bloque `2102`:** casi todo en cero; solo hay valores crudos en los bytes 54–57.
 
 ---
@@ -131,9 +164,14 @@ Detalle de cada campo y su calibración: [ecu-profiles.js](../packages/core/src/
 
 | DTC | Significado (tabla GM-Wuling) | Estado |
 |---|---|---|
-| P1535 | Sensor de temperatura del evaporador del A/C, circuito alto (abierto / a +12 V) | presente, MIL encendida. El vehículo **no tiene A/C**: circuito inexistente = abierto. Coincide con que exista el actuador 13 (relé del A/C). |
-| P0501 | Sensor de velocidad del vehículo, rango/funcionamiento | memorizado; señal de velocidad errática en los datos en vivo |
-| P0335 | Sensor de posición del cigüeñal, circuito | memorizado |
+| P1535 | Sensor de temperatura del evaporador del A/C, circuito alto (abierto / a +12 V) | presente (`0xF1`), MIL encendida. El vehículo **no tiene A/C**: circuito inexistente = abierto. Coincide con que exista el actuador 13 (relé del A/C). |
+| P0501 | Sensor de velocidad del vehículo, rango/funcionamiento | memorizado (`0x38`); señal de velocidad errática en los datos en vivo |
+| P0335 | Sensor de posición del cigüeñal, circuito | memorizado (`0x34`) |
+
+**Borrado del 2026-11-20 (~06:50):** con `14 FF 00` la ECU respondió `54 FF 00` y la lista quedó vacía. Con el motor apagado, P1535 **no reapareció** en 10, 30 ni 60 s. Copia previa: `dtc_before_clear_2026-11-20.json` y `dtc_report_before_clear_2026-11-20.html` (en la raíz, fuera de git).
+
+- [x] ¿Vuelve P1535 con el motor en marcha? **Sí.** Tras ~18 min al ralentí (07:04–07:23), a las 07:34 estaba otra vez *presente, MIL encendida* (`0xE1`). Confirma que es permanente en este auto sin A/C.
+- [ ] Ver si P0501 (velocidad) y P0335 (cigüeñal) vuelven a aparecer al conducir.
 
 Fuente de P1535/P1536/P1545: tabla Wuling "五菱汽车故障码大全" (360doc), citada en [dtc-database.js](../packages/core/src/dtc-database.js).
 

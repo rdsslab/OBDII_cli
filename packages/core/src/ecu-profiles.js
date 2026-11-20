@@ -155,11 +155,17 @@ export const KWP_DATA_BLOCKS = {
                 },
             },
             {
-                // Engine off: 9382 → 93.8 kPa = barometric pressure.
-                // Idle ~38 kPa, decel ~18 kPa, tip-in ~59 kPa: typical MAP.
+                // Behaves like MAP (idle ~24–38, decel ~18, tip-in ~59, light-load
+                // ceiling ~92–93), but raw/100 is NOT absolute kPa: engine off on
+                // 2026-11-20 06:15 it read 93.6 while the real surface pressure in
+                // the test site (2333 m) was 77.6 kPa (Open-Meteo). The old "93.8 =
+                // barometric" check assumed sea level. Neither a pure scale
+                // (idle → ~20 kPa) nor an offset (idle → ~8 kPa) fits, so the
+                // scaling stays as-is and unconfirmed. Next: log engine off +
+                // idle + WOT and compare with the known 77–78 kPa.
                 name: 'Intake Manifold Pressure (MAP)',
                 unit: 'kPa',
-                confirmed: true,
+                confirmed: false,
                 decode: (b) => {
                     const v = le16(b, 13);
                     return v === null ? null : Math.round(v / 10) / 10;
@@ -180,6 +186,12 @@ export const KWP_DATA_BLOCKS = {
                 // warm engine, with a dip typical of the thermostat opening.
                 // Matches the dashboard gauge (needle at 60–70 % when warm).
                 // Byte 2 is its complement (raw sensor voltage).
+                // Cold soak 2026-11-20 06:15, ~14 h parked: 19.5 °C with 14.0 °C
+                // outdoors (Open-Meteo, test site at 2333 m); the air sensor read
+                // 22.5 °C. Both sensors above outdoor air by a similar margin →
+                // the engine bay was warmer than outside, not a coolant offset.
+                // Scaling kept: a −5.5 °C offset would make warm idle 81 °C,
+                // below the usual thermostat opening.
                 name: 'Coolant Temp',
                 unit: '°C',
                 confirmed: true,
@@ -251,14 +263,20 @@ export const KWP_DATA_BLOCKS = {
                 },
             },
             {
-                // Slow temperature-like value (byte 5 is its complement, they
-                // sum to 243). 36–47 °C with x−40; rises with sustained revs.
-                name: 'Intake Air Temp (hypothesis)',
+                // Same layout as the coolant pair (bytes 2/3): byte 4 is the
+                // raw NTC sensor value (falls as it warms) and byte 5 the
+                // linearized temperature, scaled 0.75·x − 48.
+                // Cold soak 2026-11-20 06:15 (outdoor 14.0 °C, coolant 19.5 °C):
+                //   byte 4 = 187, byte 5 = 94 → 22.5 °C (byte 4 with x−40 gave 147 °C,
+                //   which ruled out the previous hypothesis).
+                // Warm idle: byte 5 = 163 → 74 °C, plausible for a heat-soaked
+                // manifold-mounted sensor at idle. Not yet confirmed.
+                name: 'Intake Air Temp',
                 unit: '°C',
                 confirmed: false,
                 decode: (b) => {
-                    const v = u8(b, 4);
-                    return v === null ? null : v - 40;
+                    const v = u8(b, 5);
+                    return v === null ? null : Math.round((v * 0.75 - 48) * 10) / 10;
                 },
             },
             {

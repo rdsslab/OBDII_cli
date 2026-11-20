@@ -11,6 +11,7 @@
   "scripts": {
     "start": "node index.js",
     "cli": "npm start -w @obdii/cli",
+    "server": "npm start -w @obdii/server --",
     "test": "npm test --workspaces --if-present"
   },
   "author": "edwinspire",

@@ -23,6 +23,19 @@ export async function listPorts() {
     }));
 }
 
+/**
+ * Windows creates two COM ports per paired Bluetooth SPP device. The
+ * "incoming" one has a null device address (…_000000000000) and never
+ * answers; the "outgoing" one carries the adapter's MAC and is the ELM327.
+ * @returns {{bt: 'incoming'|'outgoing'|null, mac: string|null}}
+ */
+export function describePort(port) {
+    const mac = port.pnpId?.match(/BTHENUM\\.*_([0-9A-F]{12})_/i)?.[1] || null;
+    if (!mac) return { bt: null, mac: null };
+    if (/^0+$/.test(mac)) return { bt: 'incoming', mac: null };
+    return { bt: 'outgoing', mac: mac.match(/../g).join(':') };
+}
+
 export class NodeSerialTransport {
     /**
      * @param {string} portPath - The port path (e.g. "COM6")

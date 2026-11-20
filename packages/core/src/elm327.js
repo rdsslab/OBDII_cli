@@ -39,6 +39,7 @@ const ELM327_ERRORS = [
     'ERROR',
     'STOPPED',
     '<DATA ERROR',
+    'TIMEOUT',          // no '>' prompt in time: never treat silence as data
 ];
 
 
@@ -143,7 +144,14 @@ export class ELM327 {
         if (!this.connected) throw new Error('Not connected to any device');
 
         // ── Reset & basic config ──
-        const resetResponse = await this.sendRaw('ATZ', INIT_TIMEOUT_MS);
+        // A port with no ELM327 behind it (e.g. the Bluetooth *incoming* COM
+        // port) answers nothing at all: stop here instead of "detecting" OBD2
+        // from timeouts. One retry: some clones are slow right after pairing.
+        let resetResponse = await this.sendRaw('ATZ', INIT_TIMEOUT_MS);
+        if (resetResponse === 'TIMEOUT') resetResponse = await this.sendRaw('ATZ', INIT_TIMEOUT_MS);
+        if (resetResponse === 'TIMEOUT') {
+            throw new Error('El puerto no responde como un ELM327 (sin respuesta a ATZ). ¿Es el puerto Bluetooth saliente?');
+        }
         this.version = this.extractVersion(resetResponse);
 
         await this.sendRaw('ATE0', TIMEOUT_MS);
@@ -704,6 +712,23 @@ export class ELM327 {
         if (!this.profile) return false;
         await sleep(KLINE_IDLE_RECOVERY_MS);
         return this._initWithProfile(this.profile);
+    }
+
+    /**
+     * Stronger recovery: full re-initialization of the adapter (ATZ, echo /
+     * headers / timing config, then the profile session). Needed when the
+     * ELM327 itself lost its configuration — e.g. it browned out and
+     * rebooted while the engine was cranking. Waits for K-line silence first.
+     * @returns {Promise<boolean>} true if a diagnostic session is active again
+     */
+    async reinitialize() {
+        if (!this.profile) return false;
+        const profile = this.profile;
+        this._kwpFraming = false;   // ATZ below resets the adapter's headers anyway
+        this.mode = 'unknown';
+        await sleep(KLINE_IDLE_RECOVERY_MS);
+        await this.initialize(profile);
+        return this.mode !== 'unknown';
     }
 
     /**

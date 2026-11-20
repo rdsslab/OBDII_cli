@@ -1,0 +1,17 @@
+{
+  "name": "@obdii/server",
+  "version": "1.0.0",
+  "description": "Local web server: connects to the ELM327 and serves the web UI to every device on the network",
+  "type": "module",
+  "private": true,
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "@obdii/core": "1.0.0",
+    "@obdii/serial-node": "1.0.0",
+    "@obdii/ui": "1.0.0"
+  },
+  "license": "ISC"
+}

@@ -2,7 +2,7 @@
 
 Plan para llevar la aplicación de consola actual a otras plataformas (servidor web en la laptop, PWA y app Android) sin rehacer el protocolo, que es la parte ya probada con el vehículo (ver [ECU_SIM2K-33.md](ECU_SIM2K-33.md)).
 
-- **Estado:** paso 1 (monorepo + núcleo + consola) implementado el 2026-11-20; el resto, pendiente.
+- **Estado:** pasos 1 (monorepo + núcleo + consola) y 2 (`obd-ui` + `obd-server`) implementados el 2026-11-20; el resto, pendiente.
 - **Fecha:** 2026-11-20.
 
 ### Decisiones tomadas (2026-11-20)
@@ -255,7 +255,11 @@ Con la opción B, el núcleo necesita un transporte "KWP crudo" además del de c
    - transporte simulado y pruebas en `packages/core/test` (`npm test`).
    - **Criterio de aceptación:** la consola se comporta igual que hoy, probada con el auto (DTCs, opción 20, info de la ECU).
    - Añadir el transporte simulado con respuestas grabadas para pruebas sin el vehículo.
-2. **`obd-ui` + `obd-server`.** Funciona con lo ya probado y deja lista la interfaz para el resto.
+2. ✅ **`obd-ui` + `obd-server` (2026-11-20).**
+   - `packages/core/src/diagnostics.js`: DTCs, tiempo real e info de la ECU como JSON, reutilizable por la PWA.
+   - `packages/ui`: interfaz web sin compilación, con un "cliente" intercambiable (`RemoteClient` para el servidor; la PWA tendrá un `DirectClient` con Web Serial y el mismo contrato).
+   - `apps/server`: solo `node:http`, sin dependencias externas. Usa Server-Sent Events en lugar de WebSocket: el envío es unidireccional (servidor → navegadores) y los comandos van por `fetch`.
+   - Modo `--sim` con el transporte simulado para probar sin el auto.
 3. **`obd-pwa`.** Misma interfaz con el transporte Web Serial; probar en el teléfono (`chrome://version` ≥ 137).
 4. **`obd-android`.** Capacitor + plugin Bluetooth serie; probar en el teléfono y luego en el radio.
 5. **`obd-esp32`.** Hardware propio sin ELM327. Necesita los pasos 1 y 2 (el core y `obd-ui`) si se sigue la opción B. El trabajo del hardware y del firmware se puede adelantar en paralelo.
@@ -271,7 +275,7 @@ Cada paso es usable por sí solo; si uno no da resultado (p. ej. Web Serial en A
 - [ ] **Web Serial sobre Bluetooth en Android:** confirmar con el teléfono real antes de invertir en la PWA.
 - [ ] **Plugin Bluetooth para Capacitor:** elegir uno mantenido que soporte SPP clásico (no solo BLE).
 - [ ] **Radio del auto:** versión de Android y si permite emparejar el ELM327.
-- [ ] **Seguridad en `obd-server`:** PIN para acciones de escritura (`14` borrar DTCs) y modo solo lectura para los demás clientes.
+- [x] **Seguridad en `obd-server`:** «Borrar códigos» solo con `--pin`; sin PIN el servidor es de solo lectura (2026-11-20).
 - [ ] **`obd-esp32`:**
   - elegir el transceptor (L9637D o SN65HVDA195) y la opción de software (A o B);
   - diseñar cómo detectar el contacto para no descargar la batería.

@@ -6,3 +6,4 @@ export * from './elm327.js';
 export * from './ecu-profiles.js';
 export * from './obd2-commands.js';
 export * from './dtc-database.js';
+export * from './diagnostics.js';
