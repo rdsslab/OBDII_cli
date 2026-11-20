@@ -10,3 +10,4 @@ export * from './diagnostics.js';
 export * from './session.js';
 export * from './alerts.js';
 export * from './trip-log.js';
+export * from './speed-filter.js';

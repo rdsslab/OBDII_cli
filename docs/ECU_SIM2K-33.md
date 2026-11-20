@@ -121,7 +121,11 @@ Activar salidas (parámetros `05`/`06`/`07`/`08`) queda pendiente hasta conocer 
 
 Detalle de cada campo y su calibración: [ecu-profiles.js](../packages/core/src/ecu-profiles.js).
 
-- **Velocidad del vehículo** (`2101`, byte de datos 18): la relación con las marchas encaja, pero lee menos que el velocímetro y salta de forma errática, en línea con **P0501**. Escala sin confirmar.
+- **Velocidad del vehículo** (`2101`, byte de datos 18): **confirmada con GPS** (2026-11-20, calibración desde la PWA del teléfono, 15–40 km/h). Es 1 km/h por unidad: a velocidad estable, GPS / ECU = 0.97–1.04 (≈ 1.00), y es el byte del bloque que mejor sigue al GPS (r = 0.84 con picos incluidos).
+  - El **velocímetro del tablero marca de más** (la nota anterior, tablero ~20/40/60 frente a ECU ~15/35/40, se explica así; la ECU coincide con el GPS).
+  - La ECU va ~0.5–1 s detrás del GPS y marca 0 por debajo de ~4 km/h.
+  - **Picos (P0501):** ~1 de cada 25 lecturas salta hacia arriba a 1.4–2× durante ~1 s (por ejemplo, GPS 37.5 → ECU 71 → 35), siempre entre 20 y 40 km/h y nunca hacia abajo. Es el patrón de pulsos extra del sensor de velocidad (ruido, conector o masa, rueda dentada). `SpeedSpikeFilter` los oculta solo en pantalla y alertas (una subida mayor que 5 km/h por segundo + 3 km/h se mantiene en el último valor bueno, hasta 3 s). Las grabaciones guardan el valor que envió la ECU con cada pico, el valor mostrado y una marca de pico, para seguir el fallo del sensor.
+  - Pendiente: confirmar la linealidad por encima de 40 km/h.
 - **Nivel de combustible:** no aparece en `2101`/`2102` y no hay OBD2. Comparar los bytes crudos del CSV de la opción 20 antes y después de cargar combustible.
 - **Corrección de mezcla, inyección, valores por cilindro:** escalas sin confirmar.
 - **Temperaturas en frío (2026-11-20, 06:15, ~14 h estacionado, a 2333 m de altitud):**
@@ -183,6 +187,8 @@ Fuente de P1535/P1536/P1545: tabla Wuling "五菱汽车故障码大全" (360doc)
 - [ ] Ubicar la fuente original de la tabla SIMK43 y revisarla directamente.
 - [ ] Buscar la calibración por `KR77175201` / `KR77175112` / `W1102S52`.
 - [ ] Ejecutar el plan de confirmación §3 (solo lectura).
-- [ ] Fijar la escala de la velocidad con **Ajustes → Calibración de velocidad (GPS)** en la PWA del teléfono. El CSV incluye el bloque 2101 completo y el resumen indica qué byte sigue mejor al GPS (la velocidad actual, byte 18, es sospechosa por P0501).
+- [x] Escala de la velocidad: 1 km/h por unidad, confirmada con GPS entre 15 y 40 km/h (2026-11-20).
+- [ ] Calibración GPS a 60–90 km/h para confirmar la linealidad.
+- [ ] Revisar el sensor de velocidad (conector, cableado, masa, rueda dentada): explica los picos y P0501.
 - [ ] Nivel de combustible: CSV antes y después de cargar.
 - [ ] Probar el servicio `21 F0` en otras condiciones (¿motor en marcha?).

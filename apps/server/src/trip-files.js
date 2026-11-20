@@ -92,7 +92,7 @@ export class TripFiles {
             const meta = head.find(r => r.k === 'm');
             const end = tail.find(r => r.k === 'x');
             const lastT = tail.length ? tail[tail.length - 1].t : meta?.t;
-            if (end) return { startedAt: meta?.t ?? end.summary.startedAt, durationS: end.summary.durationS, samples: end.summary.samples, events: end.summary.events, gpsSamples: end.summary.gpsSamples, complete: true, rate: meta?.meta?.rate };
+            if (end) return { startedAt: meta?.t ?? end.summary.startedAt, durationS: end.summary.durationS, samples: end.summary.samples, events: end.summary.events, gpsSamples: end.summary.gpsSamples, speedSpikes: end.summary.speedSpikes ?? 0, complete: true, rate: meta?.meta?.rate };
             return { startedAt: meta?.t ?? null, durationS: meta && lastT ? Math.round((lastT - meta.t) / 1000) : 0, samples: null, events: null, complete: false, rate: meta?.meta?.rate };
         } finally {
             await fh.close();

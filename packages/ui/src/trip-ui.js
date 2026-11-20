@@ -120,7 +120,7 @@ export class LocalTrips {
         const s = this.recorder.status();
         try {
             await this.store.append(this.id, recs, {
-                samples: s.samples, events: s.events, gpsSamples: s.gpsSamples, durationS: s.durationS,
+                samples: s.samples, events: s.events, gpsSamples: s.gpsSamples, durationS: s.durationS, speedSpikes: s.speedSpikes,
                 ...(this.recorder.recording ? {} : { complete: true }),
             });
         } catch (err) {
@@ -196,7 +196,7 @@ export function startTrips(client, { toast, onLog, getState, alerts } = {}) {
         $('tripCoords').disabled = rec || !prefs.gps;
         const dur = rec && st.startedAt ? (Date.now() - st.startedAt) / 1000 : 0;
         $('tripStatus').innerHTML = rec
-            ? `<span class="rec-dot"></span>Grabando · ${esc(fmtDuration(dur))} · ${st.samples ?? 0} muestras${backend.gps && prefs.gps ? ` · ${st.gpsSamples ?? 0} con GPS` : ''} · ${st.events ?? 0} eventos`
+            ? `<span class="rec-dot"></span>Grabando · ${esc(fmtDuration(dur))} · ${st.samples ?? 0} muestras${backend.gps && prefs.gps ? ` · ${st.gpsSamples ?? 0} con GPS` : ''} · ${st.events ?? 0} eventos${st.speedSpikes ? ` · ⚠ ${st.speedSpikes} picos de velocidad` : ''}`
             : 'Sin grabación en curso.';
         const lr = $('liveRec');
         lr.classList.toggle('rec', rec);
@@ -239,7 +239,8 @@ export function startTrips(client, { toast, onLog, getState, alerts } = {}) {
             const live = t.id === cur && backend.status?.recording;
             const when = t.startedAt ? new Date(t.startedAt).toLocaleString() : t.id;
             const parts = [fmtDuration(t.durationS), t.samples != null ? `${t.samples} muestras` : null,
-                t.gpsSamples ? `${t.gpsSamples} con GPS` : null, t.rate === '1s' ? '1/s' : null, fmtBytes(t.bytes)].filter(Boolean);
+                t.gpsSamples ? `${t.gpsSamples} con GPS` : null, t.speedSpikes ? `⚠ ${t.speedSpikes} picos de velocidad` : null,
+                t.rate === '1s' ? '1/s' : null, fmtBytes(t.bytes)].filter(Boolean);
             const badge = live ? '<span class="tag bad">grabando</span>' : t.complete === false ? '<span class="tag">interrumpida</span>' : '';
             return `<div class="trip-item" data-id="${esc(t.id)}">
                 <div class="trip-info"><strong>${esc(when)}</strong> ${badge}<small>${esc(parts.join(' · '))}</small></div>

@@ -18,7 +18,7 @@ function sample(t, ecuSpeed, trueKmh) {
         fields: [{ name: 'Vehicle Speed (ECU)', value: ecuSpeed }, { name: 'Engine RPM', value: 2000 }, { name: 'Engine State', value: 'carga parcial' }],
     };
 }
-const fix = (t, kmh, accuracy = 5, lat = -0.2, lon = -78.4) => ({ timestamp: t, coords: { speed: kmh / 3.6, accuracy, heading: 90, latitude: lat, longitude: lon } });
+const fix = (t, kmh, accuracy = 5, lat = 10.5, lon = 20.5) => ({ timestamp: t, coords: { speed: kmh / 3.6, accuracy, heading: 90, latitude: lat, longitude: lon } });
 
 test('linearFit and haversine', () => {
     const f = linearFit([1, 2, 3, 4], [3, 5, 7, 9]);
@@ -51,7 +51,7 @@ test('pairs fixes with fresh samples only; filters bad GPS; finds the better byt
     assert.ok(Math.abs(s.candidates[0].r) > 0.99);
 
     const csv = cal.toCSV({ perfil: 'SIM2K-33' });
-    assert.match(csv, /# ajuste: gps_kmh = /);
+    assert.match(csv, /# ajuste \(estable, sin atípicos\): gps_kmh = /);
     assert.match(csv, /# candidato: u8 byte 40/);
     assert.ok(!/lat|lon/.test(csv.split('\n').find(l => l.startsWith('time_iso'))), 'no coordinates by default');
     assert.equal(csv.trim().split('\n').filter(l => /^"\d{4}-/.test(l)).length, 40);
@@ -68,13 +68,53 @@ test('coordinates only when enabled', () => {
 test('falls back to the speed computed from positions when the device reports none', () => {
     const cal = new SpeedCalibrator();
     cal.start();
-    let t = 1_000_000, lon = -78.4;
+    let t = 1_000_000, lon = 20.5;
     for (let i = 0; i < 12; i++) {
         t += 1000; lon += 0.0001;                       // ~40 km/h
         cal.addSample(sample(t - 100, 28, 40));
-        cal.addFix({ timestamp: t, coords: { speed: null, accuracy: 5, heading: null, latitude: -0.2, longitude: lon } });
+        cal.addFix({ timestamp: t, coords: { speed: null, accuracy: 5, heading: null, latitude: 10.5, longitude: lon } });
     }
     const s = cal.summary();
     assert.equal(s.valid, 11, 'first fix has no previous position');
     assert.ok(Math.abs(s.meanRatio - 40 / 28) < 0.05, `ratio ${s.meanRatio}`);
+});
+
+test('robust fit ignores speed spikes and acceleration lag (drive of 2026-11-20 pattern)', () => {
+    const cal = new SpeedCalibrator();
+    cal.start();
+    let t = 2_000_000;
+    // cruise around 15–40 km/h, ECU = GPS (scale 1), one upward spike every ~12 points
+    const profile = [];
+    for (let i = 0; i < 120; i++) profile.push(25 + 13 * Math.sin(i / 15));
+    profile.forEach((g, i) => {
+        t += 1000;
+        let ecu = Math.round(g);
+        if (i % 12 === 5) ecu = Math.round(g * 1.8);            // P0501 spike
+        cal.addSample(sample(t - 300, ecu, g));
+        cal.addFix(fix(t, g, 3));
+    });
+    const s = cal.summary();
+    assert.ok(s.outliers >= 8, `outliers ${s.outliers}`);
+    assert.ok(Math.abs(s.fit.a - 1) < 0.05, `robust a=${s.fit.a}`);
+    assert.ok(s.fit.r2 > 0.98, `r2=${s.fit.r2}`);
+    assert.ok(s.fitAll.a < 0.9, `naive fit is dragged down: ${s.fitAll.a}`);
+    assert.ok(Math.abs(s.meanRatio - 1) < 0.05, `ratio ${s.meanRatio}`);
+    const csv = cal.toCSV();
+    assert.match(csv, /# ajuste \(estable, sin atípicos\): gps_kmh = 0\.9|# ajuste \(estable, sin atípicos\): gps_kmh = 1\.0/);
+    assert.match(csv, /atípicos descartados: \d+/);
+});
+
+test('calibration CSV keeps the ECU speed as sent, with the spike flag', () => {
+    const cal = new SpeedCalibrator();
+    cal.start();
+    const s = sample(1000, 33, 37);
+    s.fields[0] = { name: 'Vehicle Speed (ECU)', value: 33, rawValue: 71 };   // spike held by the session filter
+    cal.addSample(s);
+    cal.addFix(fix(1100, 37));
+    const csv = cal.toCSV();
+    const header = csv.split('\n').find(l => l.startsWith('time_iso'));
+    assert.match(header, /ecu_kmh,ecu_kmh_pantalla,pico_velocidad,ecu_raw_byte18/);
+    const row = csv.split('\n').find(l => l.startsWith('"'));
+    assert.match(row, /,71,33,1,/);
+    assert.match(csv, /# picos de velocidad del sensor \(P0501\): 1/);
 });

@@ -27,7 +27,7 @@ export function startCalibration(client, { toast, getState, onLog, alerts } = {}
 
     function render(row) {
         const s = cal.summary();
-        $('calCount').textContent = `${s.points} (${s.valid})`;
+        $('calCount').textContent = `${s.points} (${s.valid} válidos, ${s.used} usados${s.outliers ? `, ${s.outliers} atípicos` : ''})`;
         if (row) {
             $('calGps').textContent = row.gpsKmh != null ? `${fmt(row.gpsKmh)} km/h` : `sin velocidad (calculada ${fmt(row.gpsCalcKmh)} km/h)`;
             $('calAcc').textContent = row.accuracy != null ? `±${fmt(row.accuracy, 0)} m` : '—';

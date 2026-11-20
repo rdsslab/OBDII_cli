@@ -15,7 +15,16 @@
  *   {k:'x', t, summary}                           stop (missing if interrupted)
  *
  * Coordinates are stored only when includeCoords is set (privacy).
+ *
+ * Vehicle speed: the recording keeps what the ECU SENT, spikes included
+ * (they are evidence of a faulty sensor, DTC P0501), plus the filtered
+ * value shown on screen and a spike flag. Samples with a spike are kept
+ * even in 1-sample-per-second mode.
  */
+import { SPEED_FIELD } from './speed-filter.js';
+
+export const SPEED_SHOWN_FIELD = 'Vehicle Speed (pantalla, filtrada)';
+export const SPEED_SPIKE_FIELD = 'Pico de velocidad (1 = sí)';
 
 export const TRIP_RATES = { all: 0, '1s': 1000 };
 const GPS_MAX_AGE_MS = 3000;
@@ -48,6 +57,7 @@ export class TripRecorder {
         this.samples = 0;
         this.events = 0;
         this.gpsSamples = 0;
+        this.speedSpikes = 0;
         this._cols = new Map();      // name -> column index
         this._lastKept = -Infinity;
         this._gps = null;
@@ -82,6 +92,7 @@ export class TripRecorder {
             samples: this.samples,
             events: this.events,
             gpsSamples: this.gpsSamples,
+            speedSpikes: this.speedSpikes,
             rate: this.rate,
         };
     }
@@ -105,18 +116,30 @@ export class TripRecorder {
     sample(s) {
         if (!this.recording || !s?.fields?.length) return false;
         const t = s.t ?? Date.now();
+        const speed = s.fields.find(f => f.name === SPEED_FIELD);
+        const spike = !!speed && speed.rawValue != null;
         const minGap = TRIP_RATES[this.rate];
-        if (minGap && t - this._lastKept < minGap - RATE_JITTER_MS) return false;
+        if (minGap && !spike && t - this._lastKept < minGap - RATE_JITTER_MS) return false;
         this._lastKept = t;
 
-        const fresh = {};
+        // speed: raw ECU value in its own column, then what the screen showed and the spike flag
+        const fields = [];
         for (const f of s.fields) {
+            if (f.name !== SPEED_FIELD) { fields.push(f); continue; }
+            fields.push({ name: f.name, unit: f.unit, value: spike ? speed.rawValue : f.value });
+            fields.push({ name: SPEED_SHOWN_FIELD, unit: f.unit, value: f.value });
+            fields.push({ name: SPEED_SPIKE_FIELD, unit: '', value: spike ? 1 : 0 });
+        }
+        if (spike) this.speedSpikes++;
+
+        const fresh = {};
+        for (const f of fields) {
             if (!this._cols.has(f.name)) { this._cols.set(f.name, this._cols.size); fresh[f.name] = f.unit || ''; }
         }
         if (Object.keys(fresh).length) this._emit({ k: 'u', t, units: fresh });
 
         const v = new Array(this._cols.size).fill(null);
-        for (const f of s.fields) v[this._cols.get(f.name)] = f.value ?? null;
+        for (const f of fields) v[this._cols.get(f.name)] = f.value ?? null;
         const rec = { k: 's', t, v };
         if (s.raw) rec.raw = s.raw;
         if (this._gps && Math.abs(t - this._gps.t) <= GPS_MAX_AGE_MS) { rec.g = this._gps; this.gpsSamples++; }
@@ -168,6 +191,7 @@ export function tripSummary(records) {
         samples: records.filter(r => r.k === 's').length,
         events: records.filter(r => r.k === 'e').length,
         gpsSamples: records.filter(r => r.k === 's' && r.g).length,
+        speedSpikes: end?.summary?.speedSpikes ?? null,
         complete: !!end,
     };
 }
@@ -187,6 +211,7 @@ export function tripToCSV(records, extraMeta = {}) {
     // sample values by name: 'v' arrays follow the order of the 'u' records
     const colIdx = new Map(names.map((n, i) => [n, i]));
     const valueOf = (r, n) => (r.f ? r.f[n] : r.v?.[colIdx.get(n)]);
+    const spikes = records.filter(r => r.k === 's' && valueOf(r, SPEED_SPIKE_FIELD) === 1).length;
     const coords = !!s.meta.includeCoords || records.some(r => r.g && r.g.lat != null);
     const iso = (t) => (Number.isFinite(t) ? new Date(t).toISOString() : '');
     const head = [
@@ -198,6 +223,7 @@ export function tripToCSV(records, extraMeta = {}) {
         `# muestreo: ${s.meta.rate === '1s' ? '1 muestra por segundo' : 'todas las muestras'}`,
         `# inicio: ${iso(s.startedAt)}  fin: ${iso(s.endedAt)}  duración: ${s.durationS} s${s.complete ? '' : '  (interrumpida: sin cierre)'}`,
         `# muestras: ${s.samples}  con GPS: ${s.gpsSamples}  eventos: ${s.events}`,
+        ...(colIdx.has(SPEED_SPIKE_FIELD) ? [`# picos de velocidad (sensor, P0501): ${spikes}. "${SPEED_FIELD}" es lo que envió la ECU, con los picos; "${SPEED_SHOWN_FIELD}" es lo que se vio en pantalla.`] : []),
         '# tipo: muestra = lectura de sensores; evento = alerta, códigos, conexión, inicio/fin',
     ];
     const cols = ['time_iso', 'tipo', 'evento', 'detalle',

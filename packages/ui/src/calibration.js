@@ -47,6 +47,41 @@ const pearson = (xs, ys) => {
     return f ? Math.sign(f.a) * Math.sqrt(f.r2) : 0;
 };
 
+const median = (arr) => {
+    if (!arr.length) return 0;
+    const s = [...arr].sort((a, b) => a - b);
+    const m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+
+/**
+ * Fit that ignores outliers such as the P0501 speed spikes. A plain
+ * least-squares start would be dragged by the spikes themselves, so it
+ * starts from the median of y/x (spikes barely move a median), drops points
+ * whose residual is far from the rest (median absolute deviation) and
+ * refits on what is left, twice.
+ * @returns {{fit, keep: boolean[], outliers: number} | null}
+ */
+export function robustFit(xs, ys, { minResidual = 3, k = 3, rounds = 2 } = {}) {
+    if (!linearFit(xs, ys)) return null;
+    const ratios = xs.map((x, i) => (x > 0 ? ys[i] / x : null)).filter(r => r != null);
+    let model = { a: ratios.length ? median(ratios) : 1, b: 0 };
+    let keep = xs.map(() => true);
+    for (let round = 0; round < rounds; round++) {
+        const res = xs.map((x, i) => ys[i] - (model.a * x + model.b));
+        const mad = median(res.map(r => Math.abs(r - median(res))));
+        const limit = Math.max(minResidual, k * 1.4826 * mad);
+        keep = res.map(r => Math.abs(r) <= limit);
+        const f = linearFit(xs.filter((_, i) => keep[i]), ys.filter((_, i) => keep[i]));
+        if (!f) break;
+        model = f;
+    }
+    const fit = model.r2 != null ? model : linearFit(xs, ys);
+    return { fit, keep, outliers: keep.filter(k2 => !k2).length };
+}
+
+const MAX_GPS_ACCEL = 2.5;      // km/h per second: above this the ECU lag (~0.5–1 s) dominates
+
 export class SpeedCalibrator {
     constructor({ includeCoords = false } = {}) {
         this.includeCoords = includeCoords;
@@ -77,6 +112,8 @@ export class SpeedCalibrator {
         if (!s || Math.abs(t - s.t) > MAX_PAIR_AGE_MS) return null;
         const bytes = s.raw.split(' ').map(h => parseInt(h, 16));
         const val = (n) => s.fields.find(f => f.name === n)?.value ?? null;
+        const speedField = s.fields.find(f => f.name === SPEED_FIELD);
+        const spike = speedField?.rawValue != null;
         const row = {
             t,
             ecuAgeMs: t - s.t,
@@ -84,7 +121,9 @@ export class SpeedCalibrator {
             gpsCalcKmh: calcKmh,
             accuracy: c.accuracy ?? null,
             heading: c.heading ?? null,
-            ecuKmh: val(SPEED_FIELD),
+            ecuKmh: spike ? speedField.rawValue : val(SPEED_FIELD),   // as sent by the ECU (spikes kept)
+            ecuShownKmh: val(SPEED_FIELD),
+            spike: spike ? 1 : 0,
             ecuRaw: bytes[SPEED_BYTE] ?? null,
             rpm: val('Engine RPM'),
             throttle: val('Throttle Position'),
@@ -107,17 +146,42 @@ export class SpeedCalibrator {
         });
     }
 
+    /**
+     * Valid rows at steady speed: GPS speed changes less than MAX_GPS_ACCEL
+     * against the previous fix (within 2.5 s). While accelerating or braking
+     * the ECU's ~0.5–1 s lag would look like a scale error.
+     */
+    steadyRows() {
+        const all = this.rows;
+        const valid = new Set(this.validRows());
+        return all.filter((r, i) => {
+            if (!valid.has(r)) return false;
+            const p = all[i - 1];
+            if (!p || r.t - p.t > 2500 || r.t <= p.t) return true;
+            const g0 = SpeedCalibrator.gpsOf(p), g1 = SpeedCalibrator.gpsOf(r);
+            if (g0 == null || g1 == null) return true;
+            return Math.abs(g1 - g0) / ((r.t - p.t) / 1000) <= MAX_GPS_ACCEL;
+        });
+    }
+
     summary() {
         const v = this.validRows();
-        const gps = v.map(r => SpeedCalibrator.gpsOf(r));
-        const fit = linearFit(v.map(r => r.ecuRaw), gps);
-        const decoded = v.filter(r => typeof r.ecuKmh === 'number' && r.ecuKmh > 0);
+        const steady = this.steadyRows();
+        const gps = steady.map(r => SpeedCalibrator.gpsOf(r));
+        // naive fit over every valid point (what earlier versions reported)
+        const fitAll = linearFit(v.map(r => r.ecuRaw), v.map(r => SpeedCalibrator.gpsOf(r)));
+        // robust fit: steady speed only, spikes / bad points removed
+        const rf = robustFit(steady.map(r => r.ecuRaw), gps);
+        const fit = rf?.fit ?? null;
+        const clean = rf ? steady.filter((_, i) => rf.keep[i]) : steady;
+        const decoded = clean.filter(r => typeof r.ecuKmh === 'number' && r.ecuKmh > 0);
         const meanRatio = decoded.length ? decoded.reduce((s, r) => s + SpeedCalibrator.gpsOf(r) / r.ecuKmh, 0) / decoded.length : null;
 
         // Which raw byte (u8) or byte pair (le16) tracks GPS speed best?
+        // (steady rows, spikes included: they count against a candidate)
         const candidates = [];
-        if (v.length >= 10) {
-            const bytes = v.map(r => r.raw.split(' ').map(h => parseInt(h, 16)));
+        if (steady.length >= 10) {
+            const bytes = steady.map(r => r.raw.split(' ').map(h => parseInt(h, 16)));
             const len = Math.min(...bytes.map(b => b.length));
             for (let i = 0; i < len; i++) {
                 const xs = bytes.map(b => b[i]);
@@ -133,9 +197,13 @@ export class SpeedCalibrator {
         return {
             points: this.rows.length,
             valid: v.length,
+            steady: steady.length,
+            outliers: rf?.outliers ?? 0,
+            used: clean.length,
             durationS: this.startedAt ? Math.round((Date.now() - this.startedAt) / 1000) : 0,
-            fit,              // gps_kmh = a · raw + b
-            meanRatio,        // gps / decoded ECU speed
+            fit,              // robust: gps_kmh = a · raw + b
+            fitAll,           // every valid point, no filtering
+            meanRatio,        // gps / decoded ECU speed (clean points)
             candidates: candidates.slice(0, 5),
         };
     }
@@ -146,16 +214,18 @@ export class SpeedCalibrator {
             '# Calibración de velocidad: ECU vs GPS',
             `# generado: ${new Date().toISOString()}`,
             ...Object.entries(meta).map(([k, v]) => `# ${k}: ${v}`),
-            `# puntos: ${s.points}, válidos (precisión <= 20 m, >= 5 km/h): ${s.valid}`,
+            `# puntos: ${s.points}, válidos (precisión <= 20 m, >= 5 km/h): ${s.valid}, a velocidad estable (< ${MAX_GPS_ACCEL} km/h/s): ${s.steady}, atípicos descartados: ${s.outliers}, usados: ${s.used}`,
             '# velocidad GPS: la del dispositivo (gps_kmh) o, si falta, la calculada entre posiciones (gps_calc_kmh)',
-            s.fit ? `# ajuste: gps_kmh = ${s.fit.a.toFixed(4)} * byte${SPEED_BYTE} + ${s.fit.b.toFixed(2)}  (r² = ${s.fit.r2.toFixed(3)}, proporción por el origen = ${s.fit.ratio?.toFixed(4)})` : '# ajuste: datos insuficientes',
-            s.meanRatio ? `# proporción media gps / velocidad ECU actual: ${s.meanRatio.toFixed(3)}` : '# proporción media: sin datos',
+            s.fit ? `# ajuste (estable, sin atípicos): gps_kmh = ${s.fit.a.toFixed(4)} * byte${SPEED_BYTE} + ${s.fit.b.toFixed(2)}  (r² = ${s.fit.r2.toFixed(3)}, proporción por el origen = ${s.fit.ratio?.toFixed(4)})` : '# ajuste: datos insuficientes',
+            s.fitAll ? `# ajuste sin filtrar (todos los válidos): gps_kmh = ${s.fitAll.a.toFixed(4)} * byte${SPEED_BYTE} + ${s.fitAll.b.toFixed(2)}  (r² = ${s.fitAll.r2.toFixed(3)})` : '# ajuste sin filtrar: datos insuficientes',
+            s.meanRatio ? `# proporción media gps / velocidad ECU (puntos usados): ${s.meanRatio.toFixed(3)}` : '# proporción media: sin datos',
+            `# picos de velocidad del sensor (P0501): ${this.rows.filter(r => r.spike).length}. ecu_kmh = lo que envió la ECU (con picos); ecu_kmh_pantalla = lo que se vio en pantalla`,
             ...s.candidates.map(c => `# candidato: ${c.kind} byte ${c.index}  r = ${c.r.toFixed(3)}`),
         ];
-        const cols = ['time_iso', 'ecu_age_ms', 'gps_kmh', 'gps_calc_kmh', 'gps_accuracy_m', 'gps_heading', 'ecu_kmh', `ecu_raw_byte${SPEED_BYTE}`,
+        const cols = ['time_iso', 'ecu_age_ms', 'gps_kmh', 'gps_calc_kmh', 'gps_accuracy_m', 'gps_heading', 'ecu_kmh', 'ecu_kmh_pantalla', 'pico_velocidad', `ecu_raw_byte${SPEED_BYTE}`,
             'rpm', 'throttle_pct', 'engine_state', ...(this.includeCoords ? ['lat', 'lon'] : []), 'raw_2101_hex'];
         const q = (x) => x == null ? '' : typeof x === 'number' ? (Number.isInteger(x) ? String(x) : x.toFixed(3)) : `"${String(x).replace(/"/g, '""')}"`;
-        const lines = this.rows.map(r => [new Date(r.t).toISOString(), r.ecuAgeMs, r.gpsKmh, r.gpsCalcKmh, r.accuracy, r.heading, r.ecuKmh, r.ecuRaw,
+        const lines = this.rows.map(r => [new Date(r.t).toISOString(), r.ecuAgeMs, r.gpsKmh, r.gpsCalcKmh, r.accuracy, r.heading, r.ecuKmh, r.ecuShownKmh, r.spike, r.ecuRaw,
             r.rpm, r.throttle, r.state, ...(this.includeCoords ? [r.lat, r.lon] : []), r.raw].map(q).join(','));
         return [...head, cols.join(','), ...lines].join('\n');
     }

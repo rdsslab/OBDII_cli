@@ -189,6 +189,9 @@ Funcionan igual en el servidor web y en la PWA. En la pestaña **Ajustes** se co
 - **Activar el sonido:** el navegador solo permite sonido después de tocar la página una vez.
 - **Voces:** las genera `node tools/generate-voices.mjs` con las voces de Windows (Helena, es-ES; Zira, en-US). Los textos están en `packages/ui/src/sounds/phrases.js`. Para usar grabaciones propias, reemplaza los WAV conservando los nombres.
 
+### Velocidad: escala y picos
+La velocidad de la ECU (byte 18 del bloque 2101) está **confirmada con GPS**: 1 km/h por unidad entre 15 y 40 km/h (el velocímetro del tablero marca de más). El sensor a veces envía picos de 1.4–2× durante ~1 s (código P0501); la sesión los descarta (una subida mayor que 5 km/h por segundo + 3 se mantiene en el último valor bueno, hasta 3 s) solo en la **pantalla y las alertas**. Las **grabaciones conservan todos los picos**, porque son la evidencia del fallo del sensor: la columna `Vehicle Speed (ECU)` es lo que envió la ECU, `Vehicle Speed (pantalla, filtrada)` lo que se vio y `Pico de velocidad (1 = sí)` marca cada pico. Con muestreo de 1 por segundo, las muestras con pico se guardan igual. La cabecera del CSV y la lista de grabaciones indican cuántos picos hubo, y el registro anota «Pico de velocidad descartado». El CSV de calibración también guarda la velocidad tal como llegó (`ecu_kmh`), la de pantalla y la marca.
+
 ### Reconexión automática
 Si se pierde el enlace (Bluetooth caído, adaptador desenchufado, teléfono que suspendió la app), la sesión pasa a **Reconectando…** y reintenta sola a los 2, 4, 8 y 15 s y luego cada 30 s, hasta 30 min. Al reconectar retoma el tiempo real o la vigilancia de batería. En la PWA también reintenta en cuanto la app vuelve a primer plano. **Desconectar** cancela los reintentos. Antes de llegar ahí, el tiempo real se recupera por pasos: tras 3 lecturas fallidas comprueba el adaptador (`ATRV`) y reintenta sin reiniciar; si sigue fallando, reabre la sesión KWP, luego reinicia el ELM327 y luego reabre el puerto; solo entonces pasa a la reconexión completa. La alerta «Comunicación perdida» aparece a partir del segundo paso y se despeja sola cuando vuelven los datos. Mientras no llegan datos, las tarjetas se ven atenuadas con «Sin datos nuevos hace N s». El registro indica por qué falló cada lectura (NO DATA, respuesta incompleta…), y una respuesta que llega tarde se descarta para que no se mezcle con la siguiente.
 
@@ -204,7 +207,7 @@ En la PWA del teléfono (HTTPS), en Ajustes → **Calibración de velocidad**:
 3. Conduce a velocidades variadas y estables.
 
 La pantalla compara la velocidad del GPS con la de la ECU y muestra en vivo:
-- el ajuste `gps = a × byte18 + b`;
+- el ajuste `gps = a × byte18 + b`, calculado solo a velocidad estable (cambio del GPS < 2.5 km/h por segundo, porque la ECU va ~0.5–1 s detrás) y sin los puntos atípicos (picos del sensor); el CSV trae también el ajuste sin filtrar para comparar;
 - el **byte del bloque 2101 que mejor sigue al GPS**, por si la velocidad real está en otro byte.
 
 **Descargar CSV** genera un archivo con cada punto: velocidades, precisión, RPM, estado del motor y el bloque 2101 completo en hexadecimal, para analizarlo después. Las coordenadas no se guardan salvo que marques «Incluir coordenadas». Desde el servidor de la red local no funciona, porque los navegadores solo dan acceso al GPS en HTTPS o localhost.

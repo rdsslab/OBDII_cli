@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import {
-    TripRecorder, tripToCSV, tripSummary, parseTripJsonl, attachTripRecorder, tripIdFor, AlertEngine,
+    TripRecorder, tripToCSV, tripSummary, parseTripJsonl, attachTripRecorder, tripIdFor, AlertEngine, SpeedSpikeFilter,
 } from '../src/index.js';
 
 const sample = (t, coolant = 80, rpm = 900, extra = []) => ({
@@ -122,4 +122,30 @@ test('CSV export and summary of an interrupted JSONL log', () => {
 
 test('tripIdFor is file-name safe', () => {
     assert.match(tripIdFor(Date.now()), /^trip_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/);
+});
+
+test('speed spikes are kept in the recording (raw ECU value + shown value + flag), also at 1 sample/s', () => {
+    const recs = [];
+    const r = new TripRecorder({ sink: (x) => recs.push(x), rate: '1s' });
+    const filt = new SpeedSpikeFilter();
+    r.start({}, 0);
+    // 4 samples/s; the ECU spikes 37 → 71 → 70 for half a second
+    const ecu = [36, 36, 37, 37, 37, 71, 70, 37, 38, 38, 38, 38];
+    ecu.forEach((v, i) => {
+        const s = { t: i * 250, raw: '', fields: [{ name: 'Engine RPM', value: 2500, unit: 'RPM' }, { name: 'Vehicle Speed (ECU)', value: v, unit: 'km/h' }] };
+        filt.apply(s, s.t);
+        r.sample(s);
+    });
+    const sum = r.stop(4000);
+    assert.equal(sum.speedSpikes, 2);
+    const csv = tripToCSV(recs);
+    const header = csv.split('\n').find(l => l.startsWith('"time_iso"'));
+    assert.match(header, /"Vehicle Speed \(ECU\) \(km\/h\)","Vehicle Speed \(pantalla, filtrada\) \(km\/h\)","Pico de velocidad \(1 = sí\)"/);
+    const rows = csv.split('\n').filter(l => l.includes('"muestra"'));
+    // 1/s keeps t=0, 1000 (ecu[4]), 2000 (ecu[8]) + both spike samples (t=1250, 1500)
+    assert.equal(rows.length, 5);
+    assert.ok(rows.some(l => /,2500,71,37,1,/.test(l)), rows.join('\n'));
+    assert.ok(rows.some(l => /,2500,70,37,1,/.test(l)));
+    assert.ok(rows.every(l => /,1,|,0,/.test(l)));
+    assert.match(csv, /# picos de velocidad \(sensor, P0501\): 2/);
 });

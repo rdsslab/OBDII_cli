@@ -18,6 +18,7 @@
 import { ELM327 } from './elm327.js';
 import { Diagnostics } from './diagnostics.js';
 import { getProfile } from './ecu-profiles.js';
+import { SpeedSpikeFilter } from './speed-filter.js';
 
 const LIVE_MIN_INTERVAL_MS = 200;     // leaves bus time for other requests
 const LIVE_MAX_FAILURES = 3;          // then start recovering the link
@@ -299,6 +300,9 @@ export class ObdSession {
         let lastDtcPoll = Date.now();
         let lastVoltage = Date.now();
         let lostByLoop = false;
+        let lastSpikeLog = 0;
+        const speedFilter = new SpeedSpikeFilter();
+        this.speedFilter = speedFilter;
         const done = (async () => {
             while (!stop && this.diag) {
                 const t0 = Date.now();
@@ -315,6 +319,11 @@ export class ObdSession {
                     while (times.length && t0 - times[0] > 3000) times.shift();
                     const hz = times.length > 1 ? (times.length - 1) / ((times.at(-1) - times[0]) / 1000) : 0;
                     this.state.live.hz = Math.round(hz * 10) / 10;
+                    const spike = speedFilter.apply(snap, t0);
+                    if (spike && t0 - lastSpikeLog > 10_000) {
+                        lastSpikeLog = t0;
+                        this.log('warn', `Pico de velocidad descartado: la ECU envió ${spike.raw} km/h, se muestra ${spike.shown} (sensor de velocidad, P0501)`);
+                    }
                     this.emit('live', { t: t0, fields: snap.fields, raw: snap.raw, hz: this.state.live.hz });
                     if (this.dtcPollMs && t0 - lastDtcPoll >= this.dtcPollMs) {
                         lastDtcPoll = t0;

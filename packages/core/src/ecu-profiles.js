@@ -201,15 +201,18 @@ export const KWP_DATA_BLOCKS = {
                 },
             },
             {
-                // Always 0 parked; while driving rpm/value steps like gear ratios
-                // (~178 1st, ~97 2nd, ~65 3rd) → vehicle speed, km/h assumed.
-                // NOT confirmed: reads lower than the speedometer (driver held
-                // ~20/40/60, ECU showed ~15/35/40) and jumps erratically at
-                // constant rpm, consistent with stored DTC P0501 (VSS invalid
-                // signal) while the dash needle stays stable.
+                // Vehicle speed, 1 km/h per count. CONFIRMED against GPS
+                // (2026-11-20, phone PWA calibration, 15–40 km/h): GPS/ECU
+                // ≈ 1.00 (0.97–1.04) at steady speed; best-matching byte of
+                // the whole block. The dash speedometer reads HIGH (earlier
+                // note: dash ~20/40/60 vs ECU ~15/35/40), not the ECU low.
+                // ECU lags GPS ~0.5–1 s; reads 0 below ~4 km/h.
+                // About 1 read in 25 jumps UP 1.4–2× for ~1 s (P0501, extra
+                // VSS pulses): SpeedSpikeFilter (speed-filter.js) holds them.
+                // Still to check: linearity above 40 km/h.
                 name: 'Vehicle Speed (ECU)',
                 unit: 'km/h',
-                confirmed: false,
+                confirmed: true,
                 decode: (b) => u8(b, 18),
             },
             {
