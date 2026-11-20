@@ -46,6 +46,7 @@ Monorepo con *npm workspaces*: un núcleo independiente de la plataforma y una a
   - 📁 [**test/**](packages/core/test/): pruebas con un ELM327 + ECU simulados a partir de capturas reales del vehículo (`npm test`).
   - 📄 [**diagnostics.js**](packages/core/src/diagnostics.js): lógica de alto nivel (DTCs con su explicación, muestreo en tiempo real, identificación de la ECU) que devuelve JSON; la usan el servidor web y, más adelante, la PWA y la app Android.
   - 📄 [**alerts.js**](packages/core/src/alerts.js): motor de alertas (umbrales configurables, retardo, margen de salida, repetición de las críticas).
+  - 📄 [**trip-log.js**](packages/core/src/trip-log.js): grabación de datos (registros compactos y exportación a CSV).
   - 📄 [**session.js**](packages/core/src/session.js): `ObdSession`, la sesión compartida (conexión, tiempo real con recuperación escalonada, borrado). La usan el servidor y la PWA.
   - 📄 [**sim-transport.js**](packages/core/src/sim-transport.js): ELM327 + ECU SIM2K-33 simulados con capturas reales, para pruebas y demostraciones sin el auto.
 - 📁 **packages/serial-node/** (`@obdii/serial-node`): transporte para Node.js con `serialport` (puerto COM / Bluetooth SPP). Lo usan la consola y el servidor web.
@@ -111,6 +112,7 @@ npm run server -- --com COM6        # conecta al arrancar
 npm run server -- --sim             # agrega un puerto "SIM" para probar sin el auto
 npm run server -- --port 8080       # otro puerto HTTP (por defecto 3000)
 npm run server -- --pin 1234        # habilita «Borrar códigos» protegido con ese PIN
+npm run server -- --logs D:/viajes  # carpeta de las grabaciones (por defecto logs/)
 ```
 
 Al arrancar muestra las direcciones para abrir desde otros dispositivos (por ejemplo `http://192.168.1.20:3000`). Todos deben estar en la misma red: el Wi-Fi de casa o el hotspot de la laptop o del teléfono dentro del auto. Si otro dispositivo no puede abrir la página, permite Node.js en el firewall de Windows para redes privadas.
@@ -200,6 +202,33 @@ La pantalla compara la velocidad del GPS con la de la ECU y muestra en vivo:
 - el **byte del bloque 2101 que mejor sigue al GPS**, por si la velocidad real está en otro byte.
 
 **Descargar CSV** genera un archivo con cada punto: velocidades, precisión, RPM, estado del motor y el bloque 2101 completo en hexadecimal, para analizarlo después. Las coordenadas no se guardan salvo que marques «Incluir coordenadas». Desde el servidor de la red local no funciona, porque los navegadores solo dan acceso al GPS en HTTPS o localhost.
+
+---
+
+## ⏺️ Grabación de datos (pestaña Grabar)
+
+Graba todo lo que se lee para analizarlo después. Se inicia y se detiene solo con el botón (también hay un botón **Grabar** en Tiempo real); si hay conexión y el tiempo real no está activo, lo inicia.
+
+**Qué guarda cada grabación:**
+- **Muestras:** todos los sensores traducidos y el bloque crudo de la ECU en hexadecimal; en «Vigilar batería», el voltaje del ELM327.
+- **GPS** (solo PWA): velocidad, precisión, rumbo y altitud en cada muestra. Las coordenadas solo si marcas «Incluir coordenadas».
+- **Eventos:** inicio y fin, alertas que saltan y se despejan, cambios en los códigos de error, comunicación perdida y recuperada, cambios de conexión, avisos de la sesión y cortes del GPS de más de 10 s.
+
+**Muestreo:** todas las muestras (por defecto, unos 4–8 MB por hora) o 1 por segundo (unos 1.5 MB por hora).
+
+**Dónde se guarda:**
+| | Servidor web local | PWA |
+|---|---|---|
+| Almacenamiento | `logs/trip_<fecha>.jsonl` en el portátil (`--logs` para otra carpeta) | Almacenamiento del navegador (IndexedDB) |
+| Escritura | cada registro al llegar | cada 3 s y al salir de la página |
+| Si se corta | se conserva lo escrito | se conserva lo escrito; aparece como «interrumpida» |
+| GPS | no (los navegadores solo dan la ubicación por HTTPS) | sí |
+| Alertas grabadas | umbrales por defecto | los umbrales de ese dispositivo |
+| Quién la controla | cualquier dispositivo de la red; borrar pide el PIN si el servidor tiene `--pin` | ese dispositivo |
+
+En la PWA, mantén la app abierta y en primer plano: si el teléfono la suspende, la lectura del ELM327 se detiene. Mientras graba, la pantalla se mantiene encendida.
+
+**CSV:** cabecera con perfil, adaptador, muestreo, inicio, fin y totales; después una fila por muestra o evento (`tipo` = `muestra` / `evento`), una columna por sensor con su unidad, las columnas del GPS y `raw_hex`. Se abre directamente en Excel o LibreOffice (UTF-8 con BOM).
 
 ---
 

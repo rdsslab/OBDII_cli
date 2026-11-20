@@ -12,7 +12,8 @@
  * request and refuses while the engine is running. Nothing resets the ECU
  * or drives actuators.
  *
- * Usage: node src/server.js [--port 3000] [--com COM6] [--profile SIM2K_33] [--sim] [--pin 1234]
+ * Usage: node src/server.js [--port 3000] [--com COM6] [--profile SIM2K_33] [--sim] [--pin 1234] [--logs dir]
+ *   --logs folder for trip recordings (default: logs/ in the repo)
  *   --sim  adds simulated "SIM" / "SIM-OFF" ports (real captures from the
  *          SIM2K-33), to try the UI without the car.
  */
@@ -23,13 +24,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { readFile, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { ObdSession, listProfiles, generateHTMLReport } from '@obdii/core';
+import { ObdSession, listProfiles, generateHTMLReport, AlertEngine, attachTripRecorder } from '@obdii/core';
 import { listPorts, describePort, NodeSerialTransport } from '@obdii/serial-node';
 import { SimTransport } from '@obdii/core/sim-transport.js';
+import { TripFiles, TRIP_ID_RE, makeServerRecorder } from './trip-files.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UI_DIR = path.resolve(__dirname, '../../../packages/ui');
 const CORE_DIR = path.resolve(__dirname, '../../../packages/core/src');
+const DEFAULT_LOGS_DIR = path.resolve(__dirname, '../../../logs');
 
 // ── CLI args ──────────────────────────────────────────────────
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => {
@@ -57,7 +60,22 @@ function makeTransport(portPath) {
 
 const session = new ObdSession({ makeTransport });
 const sseClients = new Set();
-const publicState = () => ({ ...session.state, clients: sseClients.size, clearEnabled: !!CLEAR_PIN });
+
+// ── Trip recording (logs/*.jsonl) ─────────────────────────────
+// The server evaluates the alerts with the default thresholds only to write
+// them into the recording; each browser still shows its own alerts.
+const tripAlerts = new AlertEngine();
+session
+    .on('live', (s) => tripAlerts.update(s))
+    .on('dtcs', (d) => tripAlerts.notify('dtcs', d?.dtcs || []))
+    .on('ecu-link', (l) => tripAlerts.notify(l.ok ? 'link-ok' : 'link-lost', null, l.t))
+    .on('state', (st) => { if (st.status === 'disconnected') tripAlerts.reset(); });
+const tripRecorder = makeServerRecorder();
+attachTripRecorder(tripRecorder, { session, alerts: tripAlerts });
+const trips = new TripFiles(typeof args.logs === 'string' ? args.logs : DEFAULT_LOGS_DIR).attach(tripRecorder);
+let tripTimer = null;
+
+const publicState = () => ({ ...session.state, clients: sseClients.size, clearEnabled: !!CLEAR_PIN, trip: trips.status() });
 
 function broadcast(event, data) {
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -92,6 +110,28 @@ function checkPin(pin) {
         throw Object.assign(new Error('PIN incorrecto'), { status: 403 });
     }
     pinGuard.fails = 0;
+}
+
+function tripStart(body) {
+    const st = session.state;
+    const cur = trips.start({
+        rate: body.rate,
+        meta: { origen: 'servidor', perfil: st.profile || '—', adaptador: st.version || '—', puerto: st.port || '—' },
+    });
+    clearInterval(tripTimer);
+    tripTimer = setInterval(() => broadcast('trip', trips.status()), 2000);
+    broadcast('trip', trips.status());
+    session.log('info', `Grabación iniciada en el servidor: ${cur.id}`);
+    return trips.status();
+}
+
+async function tripStop() {
+    clearInterval(tripTimer);
+    tripTimer = null;
+    const r = await trips.stop();
+    broadcast('trip', trips.status());
+    if (r) session.log('info', `Grabación detenida: ${r.id} (${r.samples} muestras, ${r.durationS} s)`);
+    return { ...trips.status(), last: r };
 }
 
 async function clearDtcs(pin, who) {
@@ -167,6 +207,14 @@ const routes = {
     'GET /api/ecu-info/last': () => session.ecuInfo,
     'POST /api/live/start': async () => { await session.startLive(); return publicState(); },
     'POST /api/live/stop': async () => { await session.stopLive(); return publicState(); },
+    'GET /api/trip': () => trips.status(),
+    'POST /api/trip/start': (body) => tripStart(body),
+    'POST /api/trip/stop': () => tripStop(),
+    'GET /api/trips': () => trips.list(),
+    'POST /api/trips/delete': (body) => {
+        if (CLEAR_PIN) checkPin(body.pin);
+        return trips.remove(String(body.id || ''));
+    },
 };
 
 const server = http.createServer(async (req, res) => {
@@ -195,6 +243,19 @@ const server = http.createServer(async (req, res) => {
             return res.end(generateHTMLReport(dtcs, new Date(last?.t || Date.now()).toLocaleString()));
         }
 
+        const tripCsv = req.method === 'GET' && url.pathname.match(/^\/api\/trips\/([\w-]+)\.csv$/);
+        if (tripCsv) {
+            if (!TRIP_ID_RE.test(tripCsv[1])) return sendJson(res, 400, { error: 'Registro inválido' });
+            const csv = await trips.csv(tripCsv[1]).catch(() => null);
+            if (csv == null) return sendJson(res, 404, { error: 'not found' });
+            res.writeHead(200, {
+                'Content-Type': 'text/csv; charset=utf-8',
+                'Content-Disposition': `attachment; filename="${tripCsv[1]}.csv"`,
+                'Cache-Control': 'no-store',
+            });
+            return res.end('\uFEFF' + csv);
+        }
+
         const handler = routes[`${req.method} ${url.pathname}`];
         if (handler) {
             const body = req.method === 'POST' ? await readBody(req) : undefined;
@@ -217,6 +278,7 @@ server.listen(HTTP_PORT, '0.0.0.0', () => {
             if (n.family === 'IPv4' && !n.internal) console.log(`  Red:     http://${n.address}:${HTTP_PORT}`);
         }
     }
+    console.log(`  Grabaciones: ${trips.dir}`);
     console.log(CLEAR_PIN ? '  Borrado de códigos: habilitado con PIN.' : '  Borrado de códigos: deshabilitado (usa --pin para habilitarlo).');
     console.log('  Ctrl+C para salir (cierra la sesión con la ECU).\n');
     if (args.com) session.connect(args.com, args.profile ?? 'SIM2K_33').catch(() => {});
@@ -228,6 +290,7 @@ async function shutdown() {
     shuttingDown = true;
     console.log('\n  Cerrando...');
     for (const res of sseClients) res.end();
+    await tripStop().catch(() => {});
     await session.disconnect().catch(() => {});
     server.close();
     process.exit(0);

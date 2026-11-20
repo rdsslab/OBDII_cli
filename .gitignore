@@ -5,3 +5,4 @@ dtc_report_*.html
 dtc_*.json
 dtc_*.log
 apps/pwa/dist/
+logs/

@@ -222,3 +222,16 @@ input[type="number"] { width: 100%; padding: 8px 10px; border-radius: 8px; borde
 .alert-item .params label { display: flex; flex-direction: column; gap: 4px; font-size: .75rem; color: var(--muted); }
 .alert-item.off .params { opacity: .5; }
 .cal-readout { margin-top: 12px; }
+
+/* Grabar: trip recording */
+.trip-list { display: flex; flex-direction: column; gap: 8px; }
+.trip-item { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--surface-2); }
+.trip-info { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.trip-info small { flex-basis: 100%; color: var(--muted); font-size: .78rem; }
+.trip-item .tag { font-size: .7rem; padding: 1px 8px; border-radius: 999px; background: var(--surface); color: var(--muted); }
+.trip-item .tag.bad { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+.trip-item .btn { padding: 6px 12px; min-height: 36px; }
+.rec-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--bad); margin-right: 6px; animation: blink 1s infinite; vertical-align: middle; }
+#tripStatus { font-variant-numeric: tabular-nums; }
+@media (max-width: 380px) { .tabs button { font-size: .66rem; } }
+#tab-rec .settings-grid { margin-top: 12px; }

@@ -91,7 +91,8 @@ export function startAlerts(client, { toast, onLog } = {}) {
     let lastState = {};
     async function updateWakeLock(s = lastState) {
         lastState = s;
-        const want = (prefs.wake || calibrating()) && s.live?.running && document.visibilityState === 'visible';
+        const awake = [...awakeReasons.values()].some(fn => { try { return fn(); } catch { return false; } });
+        const want = ((prefs.wake && s.live?.running) || awake) && document.visibilityState === 'visible';
         try {
             if (want && !wakeLock && navigator.wakeLock) {
                 wakeLock = await navigator.wakeLock.request('screen');
@@ -103,7 +104,7 @@ export function startAlerts(client, { toast, onLog } = {}) {
         } catch { /* not supported / denied */ }
     }
     document.addEventListener('visibilitychange', () => updateWakeLock());
-    let calibrating = () => false;
+    const awakeReasons = new Map();     // key -> () => boolean (calibration, recording)
 
     // ── settings: sound ─────────────────────────────────────
     $('soundMode').value = prefs.mode;
@@ -182,6 +183,7 @@ export function startAlerts(client, { toast, onLog } = {}) {
     return {
         engine,
         sound,
-        setCalibrating(fn) { calibrating = fn; updateWakeLock(); },
+        setCalibrating(fn) { awakeReasons.set('cal', fn); updateWakeLock(); },
+        setAwake(key, fn) { awakeReasons.set(key, fn); updateWakeLock(); },
     };
 }

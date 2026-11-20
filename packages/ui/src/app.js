@@ -6,6 +6,7 @@
 import { meta } from './labels.js';
 import { startAlerts } from './alerts-ui.js';
 import { startCalibration } from './calibration-ui.js';
+import { startTrips } from './trip-ui.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -21,7 +22,6 @@ export function startApp(client) {
     let state = {};
     let busy = false;
     const stats = new Map();      // field name -> {min, max}
-    let csv = null;               // {header: string[], rows: string[]} while recording
 
     // ── Helpers ───────────────────────────────────────────────
     let toastTimer;
@@ -200,35 +200,7 @@ export function startApp(client) {
         $('liveRaw').textContent = sample.raw || '';
         if (state.live) state.live.hz = sample.hz;
         $('liveInfo').textContent = state.live?.running ? `${state.live.source} · ${fmt(sample.hz)} lecturas/s` : '';
-
-        if (csv) {
-            if (!csv.header) csv.header = ['hora', ...sample.fields.map(f => `${f.name}${f.unit ? ` (${f.unit})` : ''}`), 'raw (hex)'];
-            const q = (x) => typeof x === 'number' ? String(x) : `"${String(x ?? '').replace(/"/g, '""')}"`;
-            csv.rows.push([q(new Date(sample.t).toISOString()), ...sample.fields.map(f => q(f.value)), q(sample.raw)].join(','));
-            $('csvToggle').textContent = `Guardar CSV (${csv.rows.length})`;
-        }
     }
-
-    $('csvToggle').addEventListener('click', () => {
-        if (!csv) {
-            csv = { header: null, rows: [] };
-            $('csvToggle').classList.add('rec');
-            $('csvToggle').textContent = 'Guardar CSV (0)';
-            toast('Grabando en este dispositivo. Toca de nuevo para descargar.');
-            return;
-        }
-        const data = csv;
-        csv = null;
-        $('csvToggle').classList.remove('rec');
-        $('csvToggle').textContent = 'Grabar CSV';
-        if (!data.rows.length) return toast('No se grabaron datos');
-        const content = [data.header.map(h => `"${h.replace(/"/g, '""')}"`).join(','), ...data.rows].join('\n');
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(new Blob(['﻿' + content], { type: 'text/csv;charset=utf-8' }));
-        a.download = `live_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    });
 
     // ── DTCs ──────────────────────────────────────────────────
     function renderDtcs(result) {
@@ -343,6 +315,7 @@ export function startApp(client) {
 
     const alerts = startAlerts(client, { toast, onLog: addLog });
     startCalibration(client, { toast, onLog: addLog, getState: () => state, alerts });
+    startTrips(client, { toast, onLog: addLog, getState: () => state, alerts });
 
     renderDtcs(null);
     renderEcu(null);

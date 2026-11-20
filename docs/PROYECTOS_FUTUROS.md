@@ -275,6 +275,7 @@ Con la opción B, el núcleo necesita un transporte "KWP crudo" además del de c
      - nuevo modo «vigilar batería» (solo `ATRV`);
      - evento `ecu-link` para la alerta de comunicación perdida.
    - Calibración GPS de la velocidad en la PWA, con CSV para analizar.
+3c. ✅ **Grabación de datos (2026-11-20).** `packages/core/src/trip-log.js` y pestaña **Grabar**: sensores, bloque crudo, GPS (PWA) y eventos. El servidor graba en `logs/*.jsonl` y la PWA en IndexedDB; ambos descargan CSV.
 4. **`obd-android`.** Capacitor + plugin Bluetooth serie; probar en el teléfono y luego en el radio.
 5. **`obd-esp32`.** Hardware propio sin ELM327. Necesita los pasos 1 y 2 (el core y `obd-ui`) si se sigue la opción B. El trabajo del hardware y del firmware se puede adelantar en paralelo.
 

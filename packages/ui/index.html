@@ -33,6 +33,8 @@
       <svg viewBox="0 0 24 24"><path d="M12 3l10 18H2z" /><path d="M12 10v4M12 17.5v.5" /></svg><span>Códigos</span></button>
     <button role="tab" data-tab="ecu">
       <svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2" /><path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4" /></svg><span>ECU</span></button>
+    <button role="tab" data-tab="rec">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3.5" /></svg><span>Grabar</span></button>
     <button role="tab" data-tab="cfg">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg><span>Ajustes</span></button>
     <button role="tab" data-tab="log">
@@ -85,7 +87,7 @@
         <span id="liveInfo" class="muted"></span>
         <span class="spacer"></span>
         <label class="switch"><input type="checkbox" id="dashMode"><span>Tablero</span></label>
-        <button id="csvToggle" class="btn ghost">Grabar CSV</button>
+        <button id="liveRec" class="btn ghost" title="Grabar todos los datos (pestaña Grabar)">Grabar</button>
       </div>
       <div id="liveGrid" class="grid"></div>
       <p id="liveEmpty" class="empty">Conéctate e inicia el tiempo real para ver los sensores.</p>
@@ -112,6 +114,40 @@
         <span id="ecuInfo" class="muted"></span>
       </div>
       <div class="card"><dl id="ecuList" class="kv wide"></dl></div>
+    </section>
+
+    <!-- Grabar: registro de viaje -->
+    <section id="tab-rec" class="panel" role="tabpanel" hidden>
+      <div class="card">
+        <h2>Grabación de datos</h2>
+        <p class="hint">Guarda todos los sensores, el bloque crudo de la ECU, las alertas, los códigos y los cortes de comunicación, y el GPS si está disponible. Después descargas cada grabación como CSV.</p>
+        <p id="tripUnsupported" class="error" hidden>Este navegador no permite guardar datos localmente.</p>
+        <div class="settings-grid">
+          <label class="field">Muestreo
+            <select id="tripRate">
+              <option value="all">Todas las muestras</option>
+              <option value="1s">1 muestra por segundo</option>
+            </select>
+          </label>
+        </div>
+        <div id="tripGpsRow" class="row wrap" hidden>
+          <label class="switch"><input type="checkbox" id="tripGps"><span>Incluir GPS (velocidad, rumbo, altitud)</span></label>
+          <label class="switch"><input type="checkbox" id="tripCoords"><span>Incluir coordenadas</span></label>
+        </div>
+        <div class="row wrap actions">
+          <button id="tripToggle" class="btn primary">Iniciar grabación</button>
+          <span id="tripStatus" class="muted">Sin grabación en curso.</span>
+        </div>
+        <p id="tripWhere" class="hint"></p>
+      </div>
+      <div class="card">
+        <div class="row between">
+          <h2>Grabaciones</h2>
+          <button id="tripRefresh" class="btn ghost">Actualizar</button>
+        </div>
+        <div id="tripList" class="trip-list"></div>
+        <p id="tripUsage" class="hint"></p>
+      </div>
     </section>
 
     <!-- Ajustes: sonido, alertas, calibración -->

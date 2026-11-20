@@ -9,3 +9,4 @@ export * from './dtc-database.js';
 export * from './diagnostics.js';
 export * from './session.js';
 export * from './alerts.js';
+export * from './trip-log.js';

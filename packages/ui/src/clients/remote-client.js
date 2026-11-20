@@ -2,19 +2,20 @@
  * RemoteClient: the UI talks to @obdii/server over HTTP + Server-Sent Events.
  *
  * Client contract shared with future clients (PWA DirectClient, Android):
- *   on(event, cb)   events: 'state', 'live', 'dtcs', 'ecu-info', 'log', 'ecu-link', 'link'
+ *   on(event, cb)   events: 'state', 'live', 'dtcs', 'ecu-info', 'log', 'ecu-link', 'link', 'trip'
  *   start()
  *   listPorts(), listProfiles(), connect(port, profile), disconnect(), watchBattery(port)
  *   readVoltage(), readDtcs(), readEcuInfo(), startLive(), stopLive()
  *   clearDtcs(pin)  (only when state.clearEnabled; the one write to the ECU)
  *   reportUrl()  (null when the platform has no server-side report)
- *   capabilities: { choosePort, sharedSession }
+ *   tripStart({rate}), tripStop(), tripList(), tripDelete(id, pin), tripCsvUrl(id)  (server-side recordings)
+ *   capabilities: { choosePort, sharedSession, serverTrips }
  */
 export class RemoteClient {
     constructor(baseUrl = '') {
         this.baseUrl = baseUrl;
         this.listeners = {};
-        this.capabilities = { choosePort: true, sharedSession: true };
+        this.capabilities = { choosePort: true, sharedSession: true, serverTrips: true };
     }
 
     on(event, cb) {
@@ -30,7 +31,7 @@ export class RemoteClient {
         const es = new EventSource(`${this.baseUrl}/api/events`);
         es.onopen = () => this._emit('link', { online: true });
         es.onerror = () => this._emit('link', { online: false });
-        for (const ev of ['state', 'live', 'dtcs', 'ecu-info', 'log', 'ecu-link']) {
+        for (const ev of ['state', 'live', 'dtcs', 'ecu-info', 'log', 'ecu-link', 'trip']) {
             es.addEventListener(ev, (e) => this._emit(ev, JSON.parse(e.data)));
         }
         this.es = es;
@@ -59,4 +60,9 @@ export class RemoteClient {
     startLive() { return this._req('POST', '/api/live/start'); }
     stopLive() { return this._req('POST', '/api/live/stop'); }
     reportUrl() { return `${this.baseUrl}/api/report`; }
+    tripStart(opts = {}) { return this._req('POST', '/api/trip/start', { rate: opts.rate }); }
+    tripStop() { return this._req('POST', '/api/trip/stop'); }
+    tripList() { return this._req('GET', '/api/trips'); }
+    tripDelete(id, pin) { return this._req('POST', '/api/trips/delete', { id, pin }); }
+    tripCsvUrl(id) { return `${this.baseUrl}/api/trips/${encodeURIComponent(id)}.csv`; }
 }
