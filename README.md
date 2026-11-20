@@ -132,6 +132,8 @@ La pestaña inicial se puede elegir en la URL: `#conn`, `#live`, `#dtc`, `#ecu`,
 
 ## 📱 App web instalable (PWA)
 
+**Publicada en: https://rdsslab.github.io/OBDII_cli/**
+
 La misma interfaz, pero el navegador se conecta **directo** al ELM327 con Web Serial: no hace falta la laptop ni el servidor. Funciona en **Chrome o Edge**: en escritorio, y en Android con un Chrome reciente que soporte Web Serial por Bluetooth. No funciona en Firefox, en iPhone ni dentro de otras apps.
 
 1. Empareja el ELM327 en los ajustes de Bluetooth del dispositivo (PIN habitual `1234` o `0000`).

@@ -265,6 +265,7 @@ Con la opción B, el núcleo necesita un transporte "KWP crudo" además del de c
    - `packages/web-serial`: transporte Web Serial (USB y Bluetooth SPP emparejado; detecta la pérdida del enlace).
    - `packages/ui/src/clients/direct-client.js`: mismo contrato que `RemoteClient`, ejecutando la sesión en el navegador.
    - `apps/pwa`: compilación sin dependencias (*import map*), manifiesto, íconos, service worker para uso sin conexión y workflow de GitHub Pages.
+   - Publicada en https://rdsslab.github.io/OBDII_cli/ (GitHub Pages, workflow `Publish PWA`).
    - Probado con un puerto Web Serial simulado en Node y en Chrome headless (sin errores, instalable). **Falta probarlo con el ELM327 real**: en Chrome de la laptop (COM6) y en el teléfono.
 4. **`obd-android`.** Capacitor + plugin Bluetooth serie; probar en el teléfono y luego en el radio.
 5. **`obd-esp32`.** Hardware propio sin ELM327. Necesita los pasos 1 y 2 (el core y `obd-ui`) si se sigue la opción B. El trabajo del hardware y del firmware se puede adelantar en paralelo.
