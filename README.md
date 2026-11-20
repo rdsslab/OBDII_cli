@@ -123,7 +123,7 @@ Los códigos `P15xx` dependen del fabricante. La base de datos incluye las defin
 ## 📚 Documentación técnica
 
 - [docs/ECU_SIM2K-33.md](docs/ECU_SIM2K-33.md): identificación de la ECU, servicios soportados (lectura y escritura), los 29 actuadores del servicio `30` con su función probable, plan de verificación y pendientes de investigación.
-- [docs/PROYECTOS_FUTUROS.md](docs/PROYECTOS_FUTUROS.md): plan para separar el núcleo y crear las versiones de consola, servidor web en la laptop, PWA y app Android (teléfono y radio del auto), con pros, contras y orden propuesto.
+- [docs/PROYECTOS_FUTUROS.md](docs/PROYECTOS_FUTUROS.md): plan para separar el núcleo y crear las versiones de consola, servidor web en la laptop, PWA, app Android (teléfono y radio del auto) y un ESP32 conectado directo al OBD2 sin ELM327, con pros, contras y orden propuesto.
 
 ---
 
