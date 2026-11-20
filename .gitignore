@@ -6,3 +6,6 @@ dtc_*.json
 dtc_*.log
 apps/pwa/dist/
 logs/
+firmware/*/.pio/
+firmware/*/.vscode/
+firmware/*/include/web_assets.h

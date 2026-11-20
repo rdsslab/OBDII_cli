@@ -48,6 +48,7 @@ Separar el código en un **núcleo (core)** independiente de la plataforma y en 
 | `obd-android` | la interfaz empaquetada como APK (teléfono y radio del auto) | plugin nativo Bluetooth SPP (y USB opcional) |
 | `obd-ui` | pantallas web compartidas: DTCs, tablero en tiempo real, ECU, exportación | ninguno: habla con el core o con el servidor |
 | `obd-esp32` | firmware + hardware propio conectado al OBD2, **sin ELM327**; sirve `obd-ui` por Wi-Fi | línea K directa (transceptor L9637D / SN65HVDA195), expuesta por WebSocket |
+| `obd-esp32-elm327` | ESP32 como red Wi-Fi propia + servidor web con ingreso, conectado **al ELM327 por Bluetooth** ([firmware/esp32-elm327](../firmware/esp32-elm327/README.md), PlatformIO) | Bluetooth Classic SPP (solo ESP32 clásico) |
 
 > El ELM327 Bluetooth acepta **una sola conexión a la vez**. Laptop, teléfono y radio no pueden conectarse al adaptador al mismo tiempo. Para ver los datos en varias pantallas, una se conecta y las demás usan `obd-server`.
 
@@ -244,6 +245,16 @@ Con la opción B, el núcleo necesita un transporte "KWP crudo" además del de c
 2. **En el auto con el contacto en ON, solo lectura:** `1081`, `2101`, `18 00 FF 00`. Comparar los bytes con las capturas hechas con el ELM327.
 3. **Después:** el dashboard web por Wi-Fi y la gestión de batería (dormir con el contacto apagado).
 
+### 4.7 `obd-esp32-elm327`: ESP32 + ELM327 por Bluetooth
+El ESP32 reemplaza a la laptop del servidor: crea su propia red Wi-Fi (WPA2), se conecta al ELM327 por Bluetooth Classic y sirve el panel con usuario y clave. Proyecto en [`firmware/esp32-elm327`](../firmware/esp32-elm327/README.md) (PlatformIO).
+
+- **Viable (8/10)** con un **ESP32 clásico** (WROOM-32 / WROVER: DevKit V1, DevKitC V4, ESP32-CAM). Los S2/S3/C3/C6 no tienen Bluetooth Classic.
+- **Panel idéntico:** el ESP32 implementa la misma API que `@obdii/server`, así `packages/ui` funciona sin cambios. La interfaz y el core pesan ~72 KB comprimidos; las voces WAV (2.5 MB) no caben con 4 MB de flash: se usa la voz del navegador y los pitidos.
+- **No disponible:** GPS en el panel e instalación como PWA (sin HTTPS).
+- **Trabajo principal:** pasar a C++ la sesión (inicio KWP, bloque 2101 del SIM2K-33, códigos, recuperación). Las explicaciones de los códigos se resuelven en el navegador.
+- **Fases:** 1) comunicación y acceso ✅ (falta probar en la placa); 2) tiempo real y códigos con el panel de `packages/ui`; 3) borrado con PIN, vigilancia de batería, recuperación; 4) grabación (microSD), zumbador, OTA.
+- Más adelante, la conexión Bluetooth puede reemplazarse por la línea K directa de §4.6 sin rehacer el resto.
+
 ---
 
 ## 5. Orden propuesto
@@ -277,6 +288,7 @@ Con la opción B, el núcleo necesita un transporte "KWP crudo" además del de c
    - Calibración GPS de la velocidad en la PWA, con CSV para analizar.
 3c. ✅ **Grabación de datos (2026-11-20).** `packages/core/src/trip-log.js` y pestaña **Grabar**: sensores, bloque crudo, GPS (PWA) y eventos. El servidor graba en `logs/*.jsonl` y la PWA en IndexedDB; ambos descargan CSV.
 4. **`obd-android`.** Capacitor + plugin Bluetooth serie; probar en el teléfono y luego en el radio.
+4b. **`obd-esp32-elm327`** (§4.7). Fase 1 hecha (2026-11-20): Bluetooth al ELM327, red Wi-Fi con ingreso, prueba de ECU, terminal con lista de permitidos, simulador `npm run esp32:mock`.
 5. **`obd-esp32`.** Hardware propio sin ELM327. Necesita los pasos 1 y 2 (el core y `obd-ui`) si se sigue la opción B. El trabajo del hardware y del firmware se puede adelantar en paralelo.
 
 Cada paso es usable por sí solo; si uno no da resultado (p. ej. Web Serial en Android), se salta al siguiente sin perder lo anterior.

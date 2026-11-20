@@ -14,7 +14,8 @@
     "server": "npm start -w @obdii/server --",
     "test": "npm test --workspaces --if-present",
     "pwa": "npm start -w @obdii/pwa",
-    "pwa:build": "npm run build -w @obdii/pwa"
+    "pwa:build": "npm run build -w @obdii/pwa",
+    "esp32:mock": "node firmware/esp32-elm327/tools/mock-server.mjs"
   },
   "author": "edwinspire",
   "license": "ISC"

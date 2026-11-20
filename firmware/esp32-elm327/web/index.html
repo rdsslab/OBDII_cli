@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>OBD2 ESP32</title>
+<style>
+:root{--bg:#f4f6f8;--surface:#fff;--surface-2:#f0f3f6;--text:#14202b;--muted:#5d6b78;--border:#dde3e9;--accent:#0b7bc0;--ok:#2e7d32;--warn:#b26a00;--bad:#c62828}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1720;--surface:#17212c;--surface-2:#1d2935;--text:#e6edf3;--muted:#93a1ae;--border:#2a3744;--accent:#3aa0e6;--ok:#66bb6a;--warn:#ffb74d;--bad:#ef5350}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:8px;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--border)}
+header b{flex:1}.pill,.chip{font-size:.8rem;padding:3px 10px;border-radius:999px;background:var(--surface-2);white-space:nowrap}
+.pill::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--muted)}
+.pill[data-s=connected]::before{background:var(--ok)}.pill[data-s=error]::before{background:var(--bad)}
+.pill[data-s=scanning]::before,.pill[data-s=connecting]::before{background:var(--warn);animation:b 1s infinite}@keyframes b{50%{opacity:.3}}
+main{max-width:980px;margin:0 auto;padding:16px;display:grid;gap:16px}
+@media (min-width:820px){main{grid-template-columns:1fr 1fr}.span{grid-column:1/-1}}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;min-width:0}
+h2{font-size:1rem;margin:0 0 12px}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btn{font:inherit;padding:9px 14px;border-radius:10px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);cursor:pointer;min-height:40px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}.btn:disabled{opacity:.45;cursor:not-allowed}.btn.ghost{background:transparent}
+.btn.danger{color:var(--bad)}
+input,select{font:inherit;padding:9px 11px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);min-width:0}
+label{display:flex;flex-direction:column;gap:4px;font-size:.8rem;color:var(--muted)}
+dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;margin:0 0 12px}dt{color:var(--muted);font-size:.85rem}dd{margin:0;overflow-wrap:anywhere}
+.hint{color:var(--muted);font-size:.82rem;margin:8px 0 0}.error{color:var(--bad);font-size:.88rem}
+.banner{background:color-mix(in srgb,var(--warn) 18%,var(--surface));border:1px solid var(--warn);border-radius:12px;padding:10px 14px;font-size:.9rem}
+.devs{display:flex;flex-direction:column;gap:6px;margin-top:10px}.dev{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2)}
+.dev div{flex:1;min-width:0}.dev small{display:block;color:var(--muted);font-family:ui-monospace,monospace}.dev .tag{font-size:.7rem;color:var(--ok)}
+.term{display:flex;gap:8px;margin-top:10px}.term input{flex:1;font-family:ui-monospace,monospace;text-transform:uppercase}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.chips button{font:12px ui-monospace,monospace;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer}
+.log{list-style:none;margin:0;padding:0;max-height:420px;overflow:auto;font:12.5px/1.5 ui-monospace,monospace;background:var(--surface-2);border-radius:10px;padding:8px 10px}
+.log li{white-space:pre-wrap;overflow-wrap:anywhere}.log time{color:var(--muted);margin-right:8px}
+.log .t{color:var(--accent)}.log .r{color:var(--text)}.log .w{color:var(--warn)}.log .i{color:var(--muted)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(200px,100%),1fr));gap:10px}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#1d2935;color:#fff;padding:10px 16px;border-radius:10px;font-size:.9rem;max-width:90vw}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<header>
+  <b>OBD2 · ESP32</b>
+  <span id="pill" class="pill" data-s="off">—</span>
+  <span id="volt" class="chip" hidden></span>
+  <button id="logout" class="btn ghost" title="Salir">Salir</button>
+</header>
+<main>
+  <div id="defaults" class="banner span" hidden></div>
+
+  <section class="card">
+    <h2>Adaptador ELM327 (Bluetooth)</h2>
+    <dl>
+      <dt>Estado</dt><dd id="sBt">—</dd>
+      <dt>Adaptador</dt><dd id="sDev">—</dd>
+      <dt>ELM327</dt><dd id="sElm">—</dd>
+      <dt>Voltaje</dt><dd id="sVolt">—</dd>
+      <dt>ECU</dt><dd id="sEcu">—</dd>
+    </dl>
+    <p id="sErr" class="error" hidden></p>
+    <div class="row">
+      <button id="scan" class="btn primary">Buscar adaptadores</button>
+      <button id="disconnect" class="btn">Desconectar</button>
+    </div>
+    <div id="devs" class="devs"></div>
+    <details style="margin-top:12px"><summary class="hint" style="cursor:pointer">Conectar por MAC</summary>
+      <div class="row" style="margin-top:8px">
+        <input id="mac" placeholder="AA:BB:CC:DD:EE:FF" maxlength="17" style="flex:1;font-family:ui-monospace,monospace">
+        <input id="pin" placeholder="PIN" maxlength="8" style="width:80px">
+        <button id="connectMac" class="btn">Conectar</button>
+      </div>
+    </details>
+    <p class="hint">El adaptador debe estar en el conector OBD (con el contacto en ON para hablar con la ECU). El ESP32 recuerda el último adaptador y se reconecta solo.</p>
+  </section>
+
+  <section class="card">
+    <h2>Pruebas</h2>
+    <div class="row">
+      <button id="init" class="btn">Inicializar ELM327</button>
+      <button id="voltage" class="btn">Leer voltaje</button>
+      <button id="ecu" class="btn primary">Probar ECU</button>
+    </div>
+    <p class="hint">«Probar ECU» hace el inicio rápido KWP2000 (cabecera 81 11 F1), abre la sesión 10 81 y lee una vez el bloque 21 01. Solo lectura.</p>
+    <form id="termForm" class="term">
+      <input id="cmd" placeholder="ATRV, 2101, 1A90…" maxlength="40" autocomplete="off" spellcheck="false">
+      <button class="btn">Enviar</button>
+    </form>
+    <div class="chips" id="chips">
+      <button data-c="ATI">ATI</button><button data-c="ATRV">ATRV</button><button data-c="ATDP">ATDP</button>
+      <button data-c="2101">21 01</button><button data-c="1A90">1A 90</button><button data-c="18FF00">18 FF 00</button><button data-c="3E">3E</button>
+    </div>
+    <p class="hint">Se permiten comandos AT y servicios de solo lectura. Borrar códigos (04, 14), reiniciar la ECU (11), escrituras, rutinas y pruebas de actuadores están bloqueados.</p>
+  </section>
+
+  <section class="card span">
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">Registro</h2><button id="clearLog" class="btn ghost">Limpiar vista</button></div>
+    <ol id="log" class="log" style="margin-top:10px"></ol>
+  </section>
+
+  <section class="card">
+    <h2>Ajustes</h2>
+    <form id="cfgForm" class="grid2">
+      <label>Nombre de la red Wi-Fi<input name="apSsid" id="apSsid" maxlength="32"></label>
+      <label>Clave de la red (vacío = sin cambio)<input name="apPass" type="password" minlength="8" maxlength="63" autocomplete="new-password"></label>
+      <label>Usuario del panel<input name="webUser" id="webUser" maxlength="32" autocomplete="username"></label>
+      <label>Clave nueva del panel (vacío = sin cambio)<input name="newPass" type="password" minlength="8" autocomplete="new-password"></label>
+      <label>PIN del adaptador<input name="elmPin" id="elmPin" maxlength="8"></label>
+      <label>Clave actual (obligatoria)<input name="currentPass" type="password" required autocomplete="current-password"></label>
+    </form>
+    <div class="row" style="margin-top:12px">
+      <button id="saveCfg" class="btn primary">Guardar</button>
+      <button id="restart" class="btn">Reiniciar ESP32</button>
+    </div>
+    <p class="hint">Cambiar la red Wi-Fi reinicia el ESP32. Si olvidas las claves, mantén presionado el botón BOOT 5 s para volver a los valores de fábrica.</p>
+  </section>
+
+  <section class="card">
+    <h2>Sistema</h2>
+    <dl>
+      <dt>Firmware</dt><dd id="fw">—</dd>
+      <dt>Encendido hace</dt><dd id="up">—</dd>
+      <dt>Memoria libre</dt><dd id="heap">—</dd>
+      <dt>Red Wi-Fi</dt><dd id="ap">—</dd>
+      <dt>Dispositivos en la red</dt><dd id="clients">—</dd>
+      <dt>Sesiones abiertas</dt><dd id="sess">—</dd>
+    </dl>
+  </section>
+</main>
+<div id="toast" class="toast" hidden></div>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const BT = { off: 'Bluetooth apagado', idle: 'Sin conectar', scanning: 'Buscando…', connecting: 'Conectando…', connected: 'Conectado', error: 'Error' };
+let st = {}, bootAt = Date.now(), tt;
+function toast(m) { const t = $('toast'); t.textContent = m; t.hidden = false; clearTimeout(tt); tt = setTimeout(() => t.hidden = true, 3500); }
+
+async function api(method, path, body) {
+  const r = await fetch(path, { method, body: body ? new URLSearchParams(body) : undefined });
+  if (r.status === 401) { location.href = '/login'; throw new Error('Sesión no iniciada'); }
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || ('Error ' + r.status));
+  return d;
+}
+const act = (path, body) => api('POST', path, body).catch(e => toast(e.message));
+
+function fmtUp(s) { const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h ? `${h} h ${m} min` : `${m} min ${s % 60} s`; }
+
+function render() {
+  const b = st.bt || {}, e = st.elm || {};
+  bootAt = Date.now() - (st.uptimeS || 0) * 1000;
+  $('pill').dataset.s = b.state || 'off';
+  $('pill').textContent = b.busy && b.job ? `${BT[b.state] || b.state} · ${b.job}` : (BT[b.state] || '—');
+  $('volt').hidden = e.voltage == null; $('volt').textContent = e.voltage != null ? `${e.voltage} V` : '';
+  $('sBt').textContent = (BT[b.state] || '—') + (b.busy ? ` (${b.job}…)` : '') + (b.autoReconnect && b.state !== 'connected' ? ' · reconexión automática' : '');
+  $('sDev').textContent = b.mac ? `${b.name || 'sin nombre'} · ${b.mac}` : '—';
+  $('sElm').textContent = e.ready ? `${e.version}${e.protocol ? ' · ' + e.protocol : ''}` : (b.state === 'connected' ? 'sin inicializar' : '—');
+  $('sVolt').textContent = e.voltage != null ? `${e.voltage} V` : '—';
+  $('sEcu').textContent = st.ecu || '—';
+  $('sErr').hidden = !b.error; $('sErr').textContent = b.error || '';
+  const conn = b.state === 'connected', busy = !!b.busy;
+  $('scan').disabled = busy || conn;
+  $('disconnect').disabled = busy || !(conn || b.autoReconnect || b.state === 'error');
+  for (const id of ['init', 'voltage', 'ecu']) $(id).disabled = busy || !conn;
+  document.querySelectorAll('#termForm button, #chips button, .dev button').forEach(x => x.disabled = busy || (x.closest('.dev') ? conn : !conn));
+  $('connectMac').disabled = busy || conn;
+  const d = st.defaults || {}, warn = [];
+  if (d.web) warn.push('la clave del panel');
+  if (d.ap) warn.push('la clave de la red Wi-Fi');
+  $('defaults').hidden = !warn.length;
+  $('defaults').textContent = warn.length ? `Se están usando valores de fábrica para ${warn.join(' y ')}. Cámbialos en Ajustes.` : '';
+  $('fw').textContent = st.fw || '—';
+  $('up').textContent = st.uptimeS != null ? fmtUp(st.uptimeS) : '—';
+  $('heap').textContent = st.heap ? `${Math.round(st.heap / 1024)} KB (mínimo ${Math.round(st.minHeap / 1024)} KB)` : '—';
+  $('ap').textContent = st.apSsid || '—';
+  $('clients').textContent = st.wifiClients ?? '—';
+  $('sess').textContent = st.sessions ?? '—';
+}
+
+function renderDevs(list) {
+  $('devs').innerHTML = (list || []).sort((a, b) => b.likelyElm - a.likelyElm || b.rssi - a.rssi).map(d => `<div class="dev">
+    <div><b>${esc(d.name || 'sin nombre')}</b> ${d.likelyElm ? '<span class="tag">probable ELM327</span>' : ''}<small>${esc(d.mac)}${d.rssi ? ` · ${d.rssi} dBm` : ''}</small></div>
+    <button class="btn" data-mac="${esc(d.mac)}" data-name="${esc(d.name)}">Conectar</button></div>`).join('') || '';
+  render();
+}
+
+let lastId = 0;
+function addLog(l) {
+  if (l.id && l.id <= lastId) return;
+  lastId = l.id || lastId;
+  const li = document.createElement('li');
+  li.className = l.level;
+  const t = new Date(bootAt + (l.up || 0)).toLocaleTimeString();
+  const pre = l.level === 't' ? '→ ' : l.level === 'r' ? '← ' : l.level === 'w' ? '⚠ ' : '';
+  li.innerHTML = `<time>${esc(t)}</time>${esc(pre + l.msg)}`;
+  const box = $('log'), stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
+  box.appendChild(li);
+  while (box.children.length > 400) box.firstChild.remove();
+  if (stick) box.scrollTop = box.scrollHeight;
+}
+
+// ── actions ──
+$('scan').onclick = () => act('/api/bt/scan');
+$('disconnect').onclick = () => act('/api/bt/disconnect');
+$('init').onclick = () => act('/api/elm/init');
+$('voltage').onclick = () => act('/api/elm/voltage');
+$('ecu').onclick = () => act('/api/elm/ecu-test');
+$('devs').onclick = (e) => { const m = e.target.dataset.mac; if (m) act('/api/bt/connect', { mac: m, name: e.target.dataset.name || '', pin: $('pin').value }); };
+$('connectMac').onclick = () => act('/api/bt/connect', { mac: $('mac').value.trim().toUpperCase(), pin: $('pin').value });
+$('termForm').onsubmit = (e) => { e.preventDefault(); const c = $('cmd').value.trim(); if (c) act('/api/elm/cmd', { cmd: c }).then(() => $('cmd').select()); };
+$('chips').onclick = (e) => { const c = e.target.dataset.c; if (c) act('/api/elm/cmd', { cmd: c }); };
+$('clearLog').onclick = () => { $('log').innerHTML = ''; };
+$('logout').onclick = async () => { await fetch('/api/logout', { method: 'POST' }).catch(() => {}); location.href = '/login'; };
+$('restart').onclick = () => { if (confirm('¿Reiniciar el ESP32?')) act('/api/restart').then(() => toast('Reiniciando…')); };
+$('saveCfg').onclick = async () => {
+  const f = $('cfgForm');
+  if (!f.reportValidity()) return;
+  try {
+    const r = await api('POST', '/api/settings', Object.fromEntries(new FormData(f)));
+    f.querySelectorAll('input[type=password]').forEach(i => i.value = '');
+    if (r.restart) toast('Guardado. El ESP32 se reinicia: vuelve a conectarte a la nueva red Wi-Fi.');
+    else if (r.relogin) { toast('Guardado. Ingresa con los datos nuevos.'); setTimeout(() => location.href = '/login', 1500); }
+    else toast('Guardado');
+  } catch (e) { toast(e.message); }
+};
+
+// ── start ──
+(async () => {
+  try {
+    st = await api('GET', '/api/state'); render();
+    const cfg = await api('GET', '/api/settings');
+    $('apSsid').value = cfg.apSsid; $('webUser').value = cfg.webUser; $('elmPin').value = cfg.elmPin;
+    if (cfg.elmMac) $('mac').value = cfg.elmMac;
+    renderDevs(await api('GET', '/api/bt/devices'));
+    (await api('GET', '/api/log')).forEach(addLog);
+  } catch (e) { toast(e.message); }
+  const es = new EventSource('/api/events');
+  es.addEventListener('state', (e) => { st = JSON.parse(e.data); render(); });
+  es.addEventListener('log', (e) => addLog(JSON.parse(e.data)));
+  es.addEventListener('scan', (e) => renderDevs(JSON.parse(e.data)));
+  es.onerror = () => { $('pill').dataset.s = 'error'; $('pill').textContent = 'Sin conexión con el ESP32'; api('GET', '/api/state').then(s => { st = s; render(); }).catch(() => {}); };
+})();
+</script>
+</body>
+</html>
