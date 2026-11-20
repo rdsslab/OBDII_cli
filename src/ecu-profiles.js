@@ -10,17 +10,57 @@
 // ECU Identification Commands (KWP2000 Service 1A)
 // ═══════════════════════════════════════════════════════════════
 
+/**
+ * Fallback list, used only when the ECU doesn't answer the directory request
+ * 1A 81 (identification scaling table). Names follow ISO 14230-3 /
+ * ISO 14229 (UDS F1xx uses the same low byte); a manufacturer may use an
+ * identifier differently.
+ */
 export const ECU_ID_SUBFUNCTIONS = {
     ECU_IDENT: { id: '80', name: 'ECU Identification' },
-    PART_NUMBER: { id: '86', name: 'Part Number' },
-    SERIAL_NUMBER: { id: '87', name: 'Serial Number' },
-    SUPPLIER_ID: { id: '88', name: 'Supplier ID' },
-    HW_VERSION: { id: '91', name: 'Hardware Version' },
-    SW_VERSION: { id: '9B', name: 'Software Version' },
-    BOOT_SW: { id: '9C', name: 'Boot Software ID' },
-    CODING: { id: '97', name: 'ECU Coding' },
+    SPARE_PART: { id: '87', name: 'Vehicle Manufacturer Spare Part Number' },
+    VM_SW_NUMBER: { id: '88', name: 'Vehicle Manufacturer ECU Software Number' },
+    SUPPLIER_ID: { id: '8A', name: 'System Supplier' },
+    SERIAL_NUMBER: { id: '8C', name: 'ECU Serial Number' },
     VIN_ECU: { id: '90', name: 'VIN (from ECU)' },
-    CALIBRATION_ID: { id: '92', name: 'Calibration ID' },
+    HW_NUMBER: { id: '91', name: 'Vehicle Manufacturer ECU Hardware Number' },
+    SUPPLIER_HW: { id: '92', name: 'System Supplier ECU Hardware Number' },
+    SUPPLIER_SW: { id: '94', name: 'System Supplier ECU Software Number' },
+    ENGINE_TYPE: { id: '97', name: 'System Name / Engine Type' },
+    PROGRAMMING_DATE: { id: '99', name: 'Programming Date' },
+};
+
+/**
+ * Names for KWP 1A identification options (ISO 14230-3 / ISO 14229 F1xx).
+ * SIM2K-33 (1A 81 directory): 8A 8B 8C 8D 8E 8F 90 91 92 98 99; only
+ * 8C "KR77175201", 8D "KR77175112", 8E "W1102S52", 8F and 90 hold data.
+ */
+export const ECU_ID_NAMES = {
+    '80': 'ECU Identification (full table)',
+    '86': 'Active Diagnostic Session',
+    '87': 'Vehicle Manufacturer Spare Part Number',
+    '88': 'Vehicle Manufacturer ECU Software Number',
+    '89': 'Vehicle Manufacturer ECU Software Version',
+    '8A': 'System Supplier',
+    '8B': 'ECU Manufacturing Date',
+    '8C': 'ECU Serial Number',
+    '8D': 'Supported Functional Units',
+    '8E': 'Vehicle Manufacturer Kit Assembly Part Number',
+    '8F': 'Identifier 8F (manufacturer specific)',
+    '90': 'VIN (from ECU)',
+    '91': 'Vehicle Manufacturer ECU Hardware Number',
+    '92': 'System Supplier ECU Hardware Number',
+    '93': 'System Supplier ECU Hardware Version',
+    '94': 'System Supplier ECU Software Number',
+    '95': 'System Supplier ECU Software Version',
+    '96': 'Exhaust Regulation / Type Approval Number',
+    '97': 'System Name / Engine Type',
+    '98': 'Repair Shop Code / Tester Serial Number',
+    '99': 'Programming Date',
+    '9A': 'Calibration Repair Shop Code',
+    '9B': 'Calibration Date',
+    '9C': 'Calibration Equipment Software Number',
+    '9D': 'ECU Installation Date',
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -53,7 +93,20 @@ const u8 = (bytes, i) => (i < bytes.length ? bytes[i] : null);
 const THROTTLE_CLOSED = 13;
 const THROTTLE_WOT = 49100;
 
-const ENGINE_STATES = { 1: 'parado', 4: 'ralentí', 8: 'carga parcial', 16: 'corte combustible (desaceleración)' };
+/** Engine state bits (byte 71). Seen: 0x01 0x04 0x08 0x10 0x28 (WOT while driving), 0x00 (transition). */
+const ENGINE_STATE_BITS = [
+    [0x01, 'parado'],
+    [0x04, 'ralentí'],
+    [0x08, 'carga parcial'],
+    [0x10, 'corte combustible (desaceleración)'],
+    [0x20, 'plena carga'],
+];
+function describeEngineState(v) {
+    const names = ENGINE_STATE_BITS.filter(([bit]) => v & bit).map(([, n]) => n);
+    const unknown = v & ~ENGINE_STATE_BITS.reduce((a, [bit]) => a | bit, 0);
+    if (unknown) names.push(`0x${unknown.toString(16).toUpperCase()}`);
+    return names.length ? names.join(' + ') : 'transición (0x00)';
+}
 
 export const KWP_DATA_BLOCKS = {
     BLOCK_01: {
@@ -85,8 +138,7 @@ export const KWP_DATA_BLOCKS = {
                 confirmed: true,
                 decode: (b) => {
                     const v = u8(b, 71);
-                    if (v === null) return null;
-                    return ENGINE_STATES[v] || `0x${v.toString(16).toUpperCase()}`;
+                    return v === null ? null : describeEngineState(v);
                 },
             },
             {
@@ -137,6 +189,68 @@ export const KWP_DATA_BLOCKS = {
                 },
             },
             {
+                // Always 0 parked; while driving rpm/value steps like gear ratios
+                // (~178 1st, ~97 2nd, ~65 3rd) → vehicle speed, km/h assumed.
+                // NOT confirmed: reads lower than the speedometer (driver held
+                // ~20/40/60, ECU showed ~15/35/40) and jumps erratically at
+                // constant rpm, consistent with stored DTC P0501 (VSS invalid
+                // signal) while the dash needle stays stable.
+                name: 'Vehicle Speed (ECU)',
+                unit: 'km/h',
+                confirmed: false,
+                decode: (b) => u8(b, 18),
+            },
+            {
+                // Narrowband upstream O2 sensor. Switches 28↔174 at idle (closed
+                // loop), drops to 2–15 in decel fuel cut (lean), ~178 on tip-in
+                // (rich). ≈5 mV/count puts it at 10–890 mV, the normal narrowband
+                // range; the exact scale is not verified with a multimeter.
+                name: 'O2 Sensor B1S1',
+                unit: 'mV',
+                confirmed: true,
+                decode: (b) => {
+                    const v = u8(b, 25);
+                    return v === null ? null : v * 5;
+                },
+            },
+            {
+                // Signed. Moves opposite to the O2 sensor (rich → negative) and is
+                // exactly 0 in fuel cut / open loop → closed-loop lambda control.
+                // Scale assumed 32768 = 100 % (not verified).
+                name: 'Short-Term Fuel Trim (lambda ctrl)',
+                unit: '%',
+                confirmed: false,
+                decode: (b) => {
+                    const v = le16(b, 46);
+                    if (v === null) return null;
+                    const s = v > 32767 ? v - 65536 : v;
+                    return Math.round(s / 327.68 * 10) / 10;
+                },
+            },
+            {
+                // 2.7 ms idle, 5.2 ms tip-in, 0.8 ms decel, 0 engine off.
+                // Assumed µs (typical values for a 1.x L engine).
+                name: 'Injection Pulse',
+                unit: 'ms',
+                confirmed: false,
+                decode: (b) => {
+                    const v = le16(b, 15);
+                    return v === null ? null : Math.round(v / 10) / 100;
+                },
+            },
+            {
+                // Five LE16 values (×4 µs ≈ 2.4 ms idle) tracking Injection Pulse
+                // at ~0.23 ratio-offset (likely without injector dead time).
+                name: 'Injection per cyl. (×4µs)',
+                unit: 'ms',
+                confirmed: false,
+                decode: (b) => {
+                    const vals = [33, 35, 37, 39, 41].map(i => le16(b, i));
+                    if (vals.some(v => v === null)) return null;
+                    return vals.map(v => (v * 0.004).toFixed(2)).join(' / ');
+                },
+            },
+            {
                 // Slow temperature-like value (byte 5 is its complement, they
                 // sum to 243). 36–47 °C with x−40; rises with sustained revs.
                 name: 'Intake Air Temp (hypothesis)',
@@ -160,6 +274,26 @@ export const KWP_DATA_BLOCKS = {
                 unit: 'raw',
                 confirmed: false,
                 decode: (b) => u8(b, 62),
+            },
+            {
+                // Four identical values (one per cylinder): 185 idle, 130 @2150,
+                // 102 @3730, 150 decel. Possibly per-cylinder ignition angle /
+                // knock retard (identical = no knock correction).
+                name: 'Per-cylinder value (raw)',
+                unit: 'raw',
+                confirmed: false,
+                decode: (b) => {
+                    const vals = [29, 30, 31, 32].map(i => u8(b, i));
+                    return vals.some(v => v === null) ? null : vals.join(' / ');
+                },
+            },
+            {
+                // 0 engine off, 98–144 running; slow steps. Possibly idle air
+                // control / idle actuator position.
+                name: 'Idle control? (raw)',
+                unit: 'raw',
+                confirmed: false,
+                decode: (b) => u8(b, 54),
             },
         ],
     },
@@ -219,7 +353,9 @@ export const ECU_PROFILES = {
         sessions: [
             { cmd: '1081', name: 'Default (81)' },
             { cmd: '1089', name: 'Development (89)' },
-            { cmd: '1085', name: 'Extended (85)' },
+            // 1085 removed: on KWP2000 0x85 is ECU *programming* mode. SIM2K-33
+            // accepts it but then rejects data reads (2101 → NRC 0x80), so it
+            // was never a useful fallback and leaves the ECU in the wrong mode.
         ],
 
         testerPresentInterval: 2000,

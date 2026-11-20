@@ -14,7 +14,8 @@ Una aplicación interactiva en línea de comandos (CLI) desarrollada en **Node.j
   - Cabeceras activadas (`ATH1`) y desentramado KWP propio con validación de checksum.
 - **Perfiles de ECU Personalizados:**
   - Incluye un perfil preconfigurado para la ECU **Siemens VDO SIM2K-33** (motor de gasolina SAIC Wuling 2008), con cabeceras `81 11 F1` y sesiones de diagnóstico avanzadas.
-  - Bloque `2101` decodificado en posiciones fijas y calibrado con capturas reales (RPM, mariposa, MAP, temperatura del refrigerante, voltaje, estado del motor).
+  - Bloque `2101` decodificado en posiciones fijas y calibrado con capturas reales (RPM, mariposa, MAP, temperatura del refrigerante, voltaje, estado del motor, sensor de oxígeno); además velocidad, corrección de mezcla e inyección marcados como "por calibrar".
+  - Identificación de la ECU (servicio `1A`) a partir del directorio `1A81` que reporta la propia ECU; los campos sin programar se muestran como tales.
 - **Lectura y Decodificación de Sensores:**
   - Lectura en tiempo real de RPM del motor, velocidad del vehículo, temperatura del refrigerante, carga del motor, posición de la mariposa, voltaje de la batería, nivel de combustible y tiempo de funcionamiento del motor.
   - Modo KWP de lectura de bloques de datos primarios y secundarios.

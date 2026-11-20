@@ -11,7 +11,7 @@
  */
 
 import { connect, disconnect } from './bluetooth.js';
-import { ECU_ID_SUBFUNCTIONS, KWP_DATA_BLOCKS } from './ecu-profiles.js';
+import { ECU_ID_SUBFUNCTIONS, ECU_ID_NAMES, KWP_DATA_BLOCKS } from './ecu-profiles.js';
 
 const TIMEOUT_MS = 6000;
 const INIT_TIMEOUT_MS = 12000;
@@ -557,50 +557,64 @@ export class ELM327 {
     async readECUInfo() {
         const info = {};
 
-        for (const [key, sub] of Object.entries(ECU_ID_SUBFUNCTIONS)) {
-            const result = await this.sendRaw(`1A${sub.id}`, TIMEOUT_MS);
-
-            if (this._isError(result) || this._isNegativeResponse(result)) {
-                continue;
+        // Which identifiers exist? 1A 81 returns a directory of entries
+        // [len][id][scaling...]. Fall back to a static list if unsupported.
+        let subs = Object.values(ECU_ID_SUBFUNCTIONS);
+        const dir = await this.readECUIdentifier('81');
+        if (dir) {
+            const ids = ELM327.parseIdDirectory(dir.bytes);
+            if (ids.length) {
+                subs = ids.map(id => ({ id, name: ECU_ID_NAMES[id] || `Identifier ${id}` }));
             }
+        }
 
-            // Positive response: 5A [subFunction] [data...]
-            // Some ELM327 clones may strip the 5A prefix
-            const clean = result.replace(/\s/g, '');
-            const prefix = `5A${sub.id}`.toUpperCase();
-            let dataHex;
-
-            const idx = clean.toUpperCase().indexOf(prefix);
-            if (idx !== -1) {
-                // Standard format: 5A XX [data]
-                dataHex = clean.substring(idx + prefix.length);
-            } else {
-                // ELM327 clone: response is raw data without 5A prefix
-                // Use full response as data
-                dataHex = clean;
-            }
-
-            if (!dataHex || dataHex.length < 2) continue;
-
-            // Try to decode as ASCII text
-            let text = '';
-            for (let i = 0; i + 1 < dataHex.length; i += 2) {
-                const byte = parseInt(dataHex.substring(i, i + 2), 16);
-                if (byte >= 0x20 && byte <= 0x7E) {
-                    text += String.fromCharCode(byte);
-                } else {
-                    text += '.';
-                }
-            }
-
-            info[sub.name] = {
-                hex: dataHex,
-                text: text.trim(),
-            };
+        for (const sub of subs) {
+            const r = await this.readECUIdentifier(sub.id);
+            if (!r) continue;
+            info[sub.name] = { id: sub.id, hex: r.hex, text: r.text, empty: r.empty };
         }
 
         this.ecuInfo = info;
         return info;
+    }
+
+    /**
+     * Read one KWP 1A identification option.
+     * @param {string} id - e.g. '90'
+     * @returns {Promise<{bytes:number[], hex:string, text:string, empty:boolean}|null>}
+     */
+    async readECUIdentifier(id) {
+        const result = await this.sendRaw(`1A${id}`, TIMEOUT_MS);
+        if (this._isError(result) || this._isNegativeResponse(result)) return null;
+
+        // Positive response: 5A [id] [data...]
+        const line = result.split('\n').find(l => l.replace(/\s/g, '').toUpperCase().startsWith(`5A${id}`.toUpperCase()));
+        if (!line) return null;
+        const bytes = (line.match(/[0-9A-F]{2}/gi) || []).slice(2).map(h => parseInt(h, 16));
+        if (bytes.length === 0) return null;
+
+        const hex = bytes.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join('');
+        const empty = bytes.every(b => b === 0xFF) || bytes.every(b => b === 0x00);
+        const text = empty
+            ? '(no programado)'
+            : bytes.map(b => (b >= 0x20 && b <= 0x7E ? String.fromCharCode(b) : '.')).join('').replace(/\.{3,}/g, '…').trim();
+        return { bytes, hex, text, empty };
+    }
+
+    /**
+     * Parse a 1A 81 directory: repeated [len][id][len-2 scaling bytes],
+     * terminated by 0xFF. Returns the identifier list, e.g. ['8A','8B',…].
+     */
+    static parseIdDirectory(bytes) {
+        const ids = [];
+        let i = 0;
+        while (i < bytes.length && bytes[i] !== 0xFF) {
+            const len = bytes[i];
+            if (len < 2 || i + 1 >= bytes.length) break;
+            ids.push(bytes[i + 1].toString(16).toUpperCase().padStart(2, '0'));
+            i += len;
+        }
+        return ids;
     }
 
     /**
@@ -673,6 +687,8 @@ export class ELM327 {
         if (blockDef.length && result.bytes.length !== blockDef.length) return [];
 
         const parsed = [];
+        // Raw data bytes (hex, no "61 xx" prefix) for logging / later calibration
+        parsed.raw = result.bytes.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
         for (const field of blockDef.fields) {
             try {
                 const value = field.decode(result.bytes);

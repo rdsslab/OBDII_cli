@@ -156,6 +156,7 @@ async function connectToDevice(rl, portPath, profile = null) {
 /** OBD2 sensor keys that have an equivalent field in KWP block 2101. */
 const KWP_FIELD_FOR_OBD2 = {
     ENGINE_RPM: 'Engine RPM',
+    VEHICLE_SPEED: 'Vehicle Speed (ECU)',
     COOLANT_TEMP: 'Coolant Temp',
     THROTTLE_POSITION: 'Throttle Position',
 };
@@ -172,6 +173,11 @@ async function readSingleCommand(cmdKey) {
         const fieldName = KWP_FIELD_FOR_OBD2[cmdKey];
         if (!fieldName) {
             printWarning(`${cmd.name}: not available on this ECU (KWP2000, no equivalent in block 2101)`);
+            if (cmdKey === 'FUEL_LEVEL') {
+                printInfo('La ECU no reporta el nivel de combustible: ningún byte de los bloques 2101/2102');
+                printInfo('se comporta como un nivel y no soporta OBD2 (PID 2F). En este tipo de vehículo');
+                printInfo('el flotador del tanque suele ir cableado directo al tablero, no a la ECU.');
+            }
             return null;
         }
         const fields = await elm327.readKWPParsedBlock(KWP_DATA_BLOCKS.BLOCK_01);
@@ -495,8 +501,10 @@ async function readVIN() {
         }
     }
 
-    if (!vin && elm327.ecuInfo && elm327.ecuInfo['VIN (from ECU)']) {
-        vin = elm327.ecuInfo['VIN (from ECU)'];
+    // KWP: VIN via service 1A 90 (works without running option 16 first)
+    if (!vin) {
+        const r = elm327.ecuInfo?.['VIN (from ECU)'] || await elm327.readECUIdentifier('90');
+        if (r && !r.empty) vin = r.text;
     }
 
     if (vin) {
@@ -627,8 +635,8 @@ async function readECUInfoMenu() {
     }
 
     for (const [name, data] of entries) {
-        printValue(name, data.text || data.hex);
-        if (data.text && data.hex) {
+        printValue(data.id ? `${name} [1A${data.id}]` : name, data.text || data.hex);
+        if (data.text && data.hex && !data.empty) {
             console.log(`    ${C.dim}Hex: ${data.hex}${C.reset}`);
         }
     }
@@ -797,9 +805,16 @@ async function liveMonitor(rl) {
                 if (saveCsv && !csv) {
                     csvFile = `live_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
                     csv = fs.createWriteStream(csvFile);
-                    csv.write(['t_ms', ...values.map(v => (v.unit ? `${v.name} (${v.unit})` : v.name))].map(h => `"${h}"`).join(',') + '\n');
+                    const header = ['t_ms', ...values.map(v => (v.unit ? `${v.name} (${v.unit})` : v.name))];
+                    if (values.raw !== undefined) header.push(`raw ${sampler.source} (hex)`);
+                    csv.write(header.map(h => `"${h}"`).join(',') + '\n');
                 }
-                if (csv) csv.write([tFrame - t0, ...values.map(v => v.value ?? '')].join(',') + '\n');
+                if (csv) {
+                    // Text values may contain spaces/slashes, never commas; quote them anyway.
+                    const cells = values.map(v => (typeof v.value === 'string' ? `"${v.value}"` : (v.value ?? '')));
+                    if (values.raw !== undefined) cells.push(`"${values.raw}"`);
+                    csv.write([tFrame - t0, ...cells].join(',') + '\n');
+                }
 
                 const elapsed = (Date.now() - t0) / 1000;
                 lines.push(`  ${C.dim}${elapsed.toFixed(0).padStart(4)} s · ${frames} lecturas · ${(frames / Math.max(elapsed, 0.001)).toFixed(1)} Hz${C.reset}${csv ? `  ${C.dim}· CSV: ${csvFile}${C.reset}` : ''}`);
