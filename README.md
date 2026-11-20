@@ -10,10 +10,11 @@ Una aplicación interactiva en línea de comandos (CLI) desarrollada en **Node.j
 - **Soporte KWP2000 Completo:**
   - Inicialización rápida (Fast Init, `ATSP5`) e inicialización de 5 baudios (`ATSP4`).
   - Direccionamiento físico de ECU configurable mediante cabeceras personalizadas (Headers).
-  - Envío automático y en segundo plano de la señal **Tester Present** (`3E`) para mantener activa la sesión de diagnóstico.
+  - Mantenimiento de la sesión con el keep-alive nativo del ELM327 (`AT WM <header> 3E`), que solo se envía con el bus libre y no choca con los comandos.
+  - Cabeceras activadas (`ATH1`) y desentramado KWP propio con validación de checksum.
 - **Perfiles de ECU Personalizados:**
   - Incluye un perfil preconfigurado para la ECU **Siemens VDO SIM2K-33** (motor de gasolina SAIC Wuling 2008), con cabeceras `81 11 F1` y sesiones de diagnóstico avanzadas.
-  - Decodificación inteligente basada en patrones de anclaje dinámicos para lidiar con respuestas de longitud variable de clones ELM327 v1.5.
+  - Bloque `2101` decodificado en posiciones fijas y calibrado con capturas reales (RPM, mariposa, MAP, temperatura del refrigerante, voltaje, estado del motor).
 - **Lectura y Decodificación de Sensores:**
   - Lectura en tiempo real de RPM del motor, velocidad del vehículo, temperatura del refrigerante, carga del motor, posición de la mariposa, voltaje de la batería, nivel de combustible y tiempo de funcionamiento del motor.
   - Modo KWP de lectura de bloques de datos primarios y secundarios.
@@ -23,8 +24,9 @@ Una aplicación interactiva en línea de comandos (CLI) desarrollada en **Node.j
   - **Base de Datos Local en Español:** Identifica la causa, explicación, soluciones recomendadas y riesgos asociados de cada código.
   - **Generación de Reportes HTML:** Exporta un reporte visual interactivo y auto-contenido con los fallos detectados y sus guías de reparación paso a paso.
 - **Robustez y Auto-Recuperación:**
-  - Sistema inteligente de recuperación ante fallos de conexión común como `BUS INIT: ERROR`.
-  - Intenta automáticamente re-inicializar el canal y aplicar reinicios por hardware/software (`ATZ`) al ELM327 para continuar con el diagnóstico sin interrumpir la experiencia.
+  - Recuperación ante `BUS INIT: ERROR`: espera 6 s de silencio en la línea K (para que la ECU cierre la sesión anterior) y reintenta.
+  - Cierre limpio de la sesión KWP (`82`) al salir, para que el siguiente arranque conecte de inmediato.
+  - Los comandos al puerto serie se envían en cola, uno a la vez.
 - **Consola de Comandos Personalizados:** Envío directo de tramas hexadecimales personalizadas y comandos AT/OBD/KWP para depuración avanzada.
 - **Escaneo de Servicios del Módulo:** Comprobación rápida para descubrir qué servicios específicos (OBD2/KWP/UDS) admite la ECU conectada.
 
@@ -74,7 +76,7 @@ El código está estructurado de manera modular y limpia:
    ```bash
    npm start
    ```
-3. **Selección del Puerto COM:** La aplicación listará los puertos seriales detectados. Selecciona el número correspondiente a tu adaptador Bluetooth emparejado.
+3. **Selección del Puerto COM:** La aplicación listará los puertos seriales detectados. Windows crea **dos** puertos por adaptador Bluetooth emparejado: el *entrante* (dirección `000000000000`) nunca responde; elige el *saliente*, que la app marca como "probable ELM327" junto a la dirección MAC del adaptador.
 4. **Inicialización:**
    - La aplicación detectará el protocolo del coche automáticamente.
    - Si la ECU requiere configuraciones especiales (como KWP2000), el motor intentará asociar un perfil predefinido o probará diferentes cabeceras físicas.
@@ -103,16 +105,16 @@ El código está estructurado de manera modular y limpia:
 
 ## 🔧 Detalles Técnicos de KWP2000 y el Perfil SIM2K-33
 
-### El Desafío de los Clones ELM327 v1.5
-Muchos adaptadores baratos en el mercado (clones v1.5) no siguen el estándar estricto al procesar respuestas del protocolo ISO 14230-4 (KWP2000). En la ECU **Siemens VDO SIM2K-33**, las lecturas del bloque `21 01` (Primary Engine Data) cambian constantemente de tamaño (variando entre 9, 21, 25 y hasta 35 bytes). Esto causa que las posiciones de los bytes se desplacen y los decodificadores tradicionales fallen.
+### El problema de los clones ELM327 v1.5
+Con las cabeceras desactivadas (`ATH0`), los clones v1.5 **truncan las respuestas KWP que ocupan varias líneas**: al quitar las cabeceras de cada línea descartan también bytes de datos. Por eso el bloque `21 01` parecía tener longitud variable (9–35 bytes) y la respuesta del Servicio 18 perdía códigos de error.
 
-### Nuestra Solución: Decodificación por Patrón de Anclaje
-Para resolver este problema, en `src/ecu-profiles.js` implementamos un algoritmo que busca un **patrón de anclaje constante (`52 03 FF 00`)** dentro del flujo de bytes retornado. Una vez localizado el patrón en memoria, calculamos las posiciones de manera relativa a él:
-- **RPM reales del motor:** 2 bytes inmediatamente anteriores al ancla (en formato Little-Endian).
-- **RPM objetivo de ralentí:** Los 2 primeros bytes del ancla (`03 52` equivalente a 850 RPM).
-- **Temperatura del refrigerante (ECT):** 7 bytes adelante del ancla.
+La solución es trabajar con `ATH1` y desentramar nosotros cada mensaje ISO 14230 (`formato, destino, origen, [longitud], datos…, checksum`), validando el checksum. Con eso el bloque `21 01` mide siempre **78 bytes** y cada valor tiene una posición fija (ver `src/ecu-profiles.js`, donde está documentado cómo se calibró cada campo).
 
-Este enfoque asegura lecturas 100% estables e inmunes al desajuste de longitud del buffer del chip clonado.
+### Sesión KWP y `BUS INIT: ERROR`
+La ECU mantiene la sesión de diagnóstico abierta hasta que pasan ~5 s **sin tráfico** en la línea K. Si el ELM327 se reinicia (`ATZ`, cierre brusco de la app, corte del Bluetooth) mientras la sesión sigue abierta, todas las inicializaciones devuelven `BUS INIT: ERROR`, y reintentar de inmediato mantiene ocupado el bus, así que la ECU nunca cierra la sesión. La app espera 6 s en silencio antes de reintentar. Con el contacto apagado la ECU no responde a nada.
+
+### Códigos específicos de GM-Wuling
+Los códigos `P15xx` dependen del fabricante. La base de datos incluye las definiciones de Wuling (`P1535`, `P1536`, `P1545`). En particular, `P1535` (sensor de temperatura del evaporador del A/C, circuito abierto o en corto a +12 V) aparece de forma permanente en vehículos **sin A/C** cuya ECU está configurada para la versión con A/C.
 
 ---
 

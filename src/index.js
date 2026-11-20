@@ -91,7 +91,14 @@ async function selectPort(rl) {
 
     ports.forEach((port, index) => {
         const mfg = port.manufacturer !== 'Unknown' ? ` [${port.manufacturer}]` : '';
-        console.log(`  ${C.cyan}${index + 1}.${C.reset} ${C.bold}${port.path}${C.reset}${C.dim}${mfg} - ${port.friendlyName}${C.reset}`);
+        // Windows creates two COM ports per paired SPP device. The "incoming"
+        // one has a null device address (…_000000000000) and never answers;
+        // the "outgoing" one carries the adapter's BT MAC and is the ELM327.
+        const btMac = port.pnpId.match(/BTHENUM\\.*_([0-9A-F]{12})_/i)?.[1];
+        let hint = '';
+        if (btMac && /^0+$/.test(btMac)) hint = ` ${C.yellow}(BT entrante — normalmente NO es el ELM327)${C.reset}`;
+        else if (btMac) hint = ` ${C.green}(BT saliente ${btMac.match(/../g).join(':')} — probable ELM327)${C.reset}`;
+        console.log(`  ${C.cyan}${index + 1}.${C.reset} ${C.bold}${port.path}${C.reset}${C.dim}${mfg} - ${port.friendlyName}${C.reset}${hint}`);
     });
 
     console.log();
@@ -146,11 +153,35 @@ async function connectToDevice(rl, portPath, profile = null) {
 // OBD2 Command Execution
 // ═══════════════════════════════════════════════════════════════
 
+/** OBD2 sensor keys that have an equivalent field in KWP block 2101. */
+const KWP_FIELD_FOR_OBD2 = {
+    ENGINE_RPM: 'Engine RPM',
+    COOLANT_TEMP: 'Coolant Temp',
+    THROTTLE_POSITION: 'Throttle Position',
+};
+
 async function readSingleCommand(cmdKey) {
     const cmd = OBD2_COMMANDS[cmdKey];
     if (!cmd) {
         printError(`Unknown command: ${cmdKey}`);
         return null;
+    }
+
+    // KWP-only ECUs reject OBD2 PIDs: read the value from data block 2101.
+    if (elm327.mode === 'kwp2000' && !/^AT/i.test(cmd.command)) {
+        const fieldName = KWP_FIELD_FOR_OBD2[cmdKey];
+        if (!fieldName) {
+            printWarning(`${cmd.name}: not available on this ECU (KWP2000, no equivalent in block 2101)`);
+            return null;
+        }
+        const fields = await elm327.readKWPParsedBlock(KWP_DATA_BLOCKS.BLOCK_01);
+        const f = fields.find(x => x.name === fieldName);
+        if (!f) {
+            printWarning(`${cmd.name}: no data from KWP block 2101`);
+            return null;
+        }
+        const note = f.confirmed ? ' (KWP 2101)' : ' (KWP 2101, sin confirmar)';
+        return { name: cmd.name + note, value: f.value, unit: f.unit, raw: '' };
     }
 
     const result = await elm327.sendCommand(cmd.command);
@@ -199,27 +230,18 @@ async function readAllSensors() {
 
             const bytes = raw.bytes;
 
-            // Resolve anchor index for pattern-based blocks (e.g. BLOCK_01)
-            let anchorIdx = 0;
-            if (blockDef.anchor) {
-                const found = (() => {
-                    for (let i = 0; i <= bytes.length - blockDef.anchor.length; i++) {
-                        if (blockDef.anchor.every((b, j) => bytes[i + j] === b)) return i;
-                    }
-                    return -1;
-                })();
-                if (found === -1) {
-                    console.log(`  ${C.dim}  ⚠ Anchor pattern not found — showing raw only${C.reset}`);
-                } else {
-                    anchorIdx = found;
-                }
+            // Fields use fixed positions; a different length means a different
+            // ECU/firmware layout, so don't show values that could be wrong.
+            const lengthOk = !blockDef.length || bytes.length === blockDef.length;
+            if (!lengthOk) {
+                console.log(`  ${C.dim}  ⚠ Unexpected length ${bytes.length}B (expected ${blockDef.length}B) — showing raw only${C.reset}`);
             }
 
             // Decode calibrated fields
-            if (blockDef.fields && blockDef.fields.length > 0) {
+            if (lengthOk && blockDef.fields && blockDef.fields.length > 0) {
                 for (const field of blockDef.fields) {
                     try {
-                        const value = field.decode(bytes, anchorIdx);
+                        const value = field.decode(bytes);
                         if (value === null || value === undefined) continue;
                         if (field.confirmed) {
                             printValue(field.name, value, field.unit);
@@ -660,9 +682,9 @@ async function readKWPLiveData() {
     }
 
     console.log();
-    printInfo('Response length varies (9-35 bytes observed for block 01).');
-    printInfo('Byte positions shift between sessions — raw dump only.');
-    printInfo('Use ATRV for reliable battery voltage reading.');
+    printInfo('Frames are decoded with headers ON (ATH1) and checksum-validated;');
+    printInfo('block 01 is a fixed 78 data bytes on SIM2K (older 9-35 byte dumps were');
+    printInfo('truncated by the ELM327 clone with ATH0). Use ATRV for battery voltage.');
 }
 
 // ═══════════════════════════════════════════════════════════════

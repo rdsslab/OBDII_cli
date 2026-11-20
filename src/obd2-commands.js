@@ -33,6 +33,28 @@ function decodeDTC(byteA, byteB) {
 }
 
 /**
+ * Describe a KWP2000 statusOfDTC byte (ISO 14230-3):
+ *   bits 0-3: fault symptom (1 above max, 2 below min, 4 no signal, 8 invalid signal)
+ *   bit 4:    readiness (1 = test not completed this cycle)
+ *   bits 5-6: storage state (01 stored/not present, 10 maturing/intermittent, 11 present now)
+ *   bit 7:    warning lamp (MIL) requested
+ * @param {number} status
+ * @returns {string}
+ */
+export function describeKwpDtcStatus(status) {
+  const parts = [];
+  const storage = (status >> 5) & 0x03;
+  parts.push(['no detectado', 'memorizado (no presente ahora)', 'intermitente', 'presente ahora'][storage]);
+  if (status & 0x80) parts.push('MIL encendida');
+  const symptom = status & 0x0F;
+  const symptoms = { 1: 'sobre el máximo', 2: 'bajo el mínimo', 4: 'sin señal', 8: 'señal inválida' };
+  if (symptoms[symptom]) parts.push(symptoms[symptom]);
+  else if (symptom) parts.push(`síntoma 0x${symptom.toString(16).toUpperCase()}`);
+  if (status & 0x10) parts.push('prueba incompleta');
+  return `${parts.join(', ')}; 0x${status.toString(16).toUpperCase().padStart(2, '0')}`;
+}
+
+/**
  * Common OBD2 commands organized by category.
  */
 export const OBD2_COMMANDS = {
@@ -369,26 +391,19 @@ export const KWP_COMMANDS = {
   ],
 
   // Parser for any Service 18 positive response (0x58)
+  // Response: 58 [numberOfDTC] { [DTC high] [DTC low] [statusOfDTC] } x N
   parseDTC18(hex) {
     const bytes = parseHexBytes(hex);
     const dataStart = bytes.indexOf(0x58);
     if (dataStart === -1) return [];
+    const count = bytes[dataStart + 1] ?? 0;
     const dtcs = [];
-    // Skip response byte (58) and sub-function echo byte
-    for (let i = dataStart + 2; i + 2 < bytes.length; i += 3) {
+    for (let n = 0, i = dataStart + 2; n < count && i + 2 < bytes.length; n++, i += 3) {
       const byteA = bytes[i];
       const byteB = bytes[i + 1];
       const status = bytes[i + 2];
       if (byteA === 0 && byteB === 0) continue;
-      const code = decodeDTC(byteA, byteB);
-      const flags = [];
-      if (status & 0x01) flags.push('current');
-      if (status & 0x08) flags.push('confirmed');
-      if (status & 0x20) flags.push('active');
-      if (status & 0x40) flags.push('self-cleared');
-      if (status & 0x80) flags.push('MIL on');
-      const statusStr = flags.length > 0 ? ` [${flags.join(', ')}]` : ' [stored]';
-      dtcs.push(code + statusStr);
+      dtcs.push(`${decodeDTC(byteA, byteB)} [${describeKwpDtcStatus(status)}]`);
     }
     return dtcs;
   },

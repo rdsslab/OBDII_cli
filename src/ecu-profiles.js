@@ -29,27 +29,31 @@ export const ECU_ID_SUBFUNCTIONS = {
 
 /**
  * Data block definitions for KWP2000 Service 21 (readDataByLocalIdentifier).
- * 
- * IMPORTANT: The ELM327 v1.5 clone returns VARIABLE-LENGTH responses
- * for block 01 (observed: 9, 25, 26, 35 bytes). Fixed byte offsets 
- * are NOT reliable. The byte positions shift between sessions.
- * 
- * Current approach: show raw hex dump only. No automatic parsing.
- * Battery voltage is read separately via ELM327 ATRV command.
- * 
- * The stable pattern 9A 09 00 2D appears in all responses as a
- * calibration/reference constant — it is NOT battery voltage.
+ *
+ * `bytes` passed to decode() are the DATA bytes, i.e. the response without
+ * the "61 <blockId>" prefix. (Frame index = data index + 2.)
+ *
+ * History: older notes claimed block 01 had a VARIABLE length (9–35 bytes)
+ * and needed anchor-pattern decoding. That was an artifact of the ELM327 v1.5
+ * clone truncating multi-line KWP frames with ATH0. With headers ON and
+ * checksum-validated framing (see elm327.js) block 01 is always 78 data bytes
+ * at fixed positions.
+ *
+ * Calibration (2026-11-19, SIM2K-33 on SAIC Wuling), from three captures:
+ *   - idle (~960 rpm), revving in neutral (~2150 and ~3730 rpm, decel fuel cut)
+ *   - key ON / engine OFF with accelerator released → floored → released
+ * `confirmed: true`  = verified against a physical reference (see notes).
+ * `confirmed: false` = best hypothesis, shown dimmed as "needs calibration".
  */
-/**
- * Find a byte sequence (needle) inside a byte array (haystack).
- * Returns the index of the first match, or -1.
- */
-function findBytes(haystack, needle) {
-    for (let i = 0; i <= haystack.length - needle.length; i++) {
-        if (needle.every((b, j) => haystack[i + j] === b)) return i;
-    }
-    return -1;
-}
+
+const le16 = (bytes, i) => (i + 1 < bytes.length ? bytes[i] | (bytes[i + 1] << 8) : null);
+const u8 = (bytes, i) => (i < bytes.length ? bytes[i] : null);
+
+/** Raw throttle value with pedal released / floored (key-on engine-off test). */
+const THROTTLE_CLOSED = 13;
+const THROTTLE_WOT = 49100;
+
+const ENGINE_STATES = { 1: 'parado', 4: 'ralentí', 8: 'carga parcial', 16: 'corte combustible (desaceleración)' };
 
 export const KWP_DATA_BLOCKS = {
     BLOCK_01: {
@@ -57,60 +61,105 @@ export const KWP_DATA_BLOCKS = {
         command: '2101',
         name: 'Primary Engine Data',
         responsePrefix: 0x61,
-        // PATTERN-BASED decoding — response length varies (21–31 bytes).
-        // Anchor: bytes [52 03 FF 00] appear consistently in the data stream.
-        //   - RPM actual:  2 bytes BEFORE anchor, little-endian uint16
-        //   - Target RPM:  bytes [anchor+0 : anchor+1] = always 0x0352 = 850
-        //   - ECT:         byte at anchor+7 (°C direct)
-        //   - Dyn bytes:   anchor+4 and anchor+5 are very variable (lambda/injector?)
-        //
-        // Verified against 5 real captures (21B, 21B, 23B, 28B, 31B).
-        anchor: [0x52, 0x03, 0xFF, 0x00],
+        length: 78,
         fields: [
             {
+                // Matches the revving test exactly (idle ~960, steps to ~2150/~3730).
                 name: 'Engine RPM',
                 unit: 'RPM',
                 confirmed: true,
-                decode: (bytes, anchorIdx) => {
-                    if (anchorIdx < 2) return null;
-                    return (bytes[anchorIdx - 1] << 8) | bytes[anchorIdx - 2];  // LE
-                },
+                decode: (b) => le16(b, 19),
             },
             {
+                // Constant 0x0352 = 850 in every capture (also with engine stopped).
                 name: 'Target Idle RPM',
                 unit: 'RPM',
                 confirmed: true,
-                decode: (bytes, anchorIdx) => {
-                    if (anchorIdx + 1 >= bytes.length) return null;
-                    return (bytes[anchorIdx + 1] << 8) | bytes[anchorIdx];  // always 850
+                decode: (b) => le16(b, 21),
+            },
+            {
+                // 1 stopped, 4 idle, 8 part load, 16 decel fuel cut (seen at
+                // 2890 rpm with throttle closed). Bit-coded.
+                name: 'Engine State',
+                unit: '',
+                confirmed: true,
+                decode: (b) => {
+                    const v = u8(b, 71);
+                    if (v === null) return null;
+                    return ENGINE_STATES[v] || `0x${v.toString(16).toUpperCase()}`;
                 },
             },
             {
+                // Key-on engine-off: 13 released, 49100 floored. Exactly 13 at
+                // idle and during decel; rises with pedal while revving.
+                name: 'Throttle Position',
+                unit: '%',
+                confirmed: true,
+                decode: (b) => {
+                    const v = le16(b, 6);
+                    if (v === null) return null;
+                    const pct = (v - THROTTLE_CLOSED) / (THROTTLE_WOT - THROTTLE_CLOSED) * 100;
+                    return Math.max(0, Math.round(pct * 10) / 10);
+                },
+            },
+            {
+                // Engine off: 9382 → 93.8 kPa = barometric pressure.
+                // Idle ~38 kPa, decel ~18 kPa, tip-in ~59 kPa: typical MAP.
+                name: 'Intake Manifold Pressure (MAP)',
+                unit: 'kPa',
+                confirmed: true,
+                decode: (b) => {
+                    const v = le16(b, 13);
+                    return v === null ? null : Math.round(v / 10) / 10;
+                },
+            },
+            {
+                // ×0.1 tracks ATRV: 12.5 V engine off, 13.1–14.5 V charging.
+                name: 'Battery Voltage (ECU)',
+                unit: 'V',
+                confirmed: true,
+                decode: (b) => {
+                    const v = u8(b, 0);
+                    return v === null ? null : v / 10;
+                },
+            },
+            {
+                // Standard Siemens/Bosch scaling 0.75·x − 48 gives 82–91 °C on a
+                // warm engine, with a dip typical of the thermostat opening.
+                // Matches the dashboard gauge (needle at 60–70 % when warm).
+                // Byte 2 is its complement (raw sensor voltage).
                 name: 'Coolant Temp',
                 unit: '°C',
                 confirmed: true,
-                decode: (bytes, anchorIdx) => {
-                    const idx = anchorIdx + 7;
-                    return idx < bytes.length ? bytes[idx] : null;
+                decode: (b) => {
+                    const v = u8(b, 3);
+                    return v === null ? null : Math.round((v * 0.75 - 48) * 10) / 10;
                 },
             },
             {
-                name: 'Dynamic A (anchor+4)',
-                unit: 'raw',
+                // Slow temperature-like value (byte 5 is its complement, they
+                // sum to 243). 36–47 °C with x−40; rises with sustained revs.
+                name: 'Intake Air Temp (hypothesis)',
+                unit: '°C',
                 confirmed: false,
-                decode: (bytes, anchorIdx) => {
-                    const idx = anchorIdx + 4;
-                    return idx < bytes.length ? bytes[idx] : null;
+                decode: (b) => {
+                    const v = u8(b, 4);
+                    return v === null ? null : v - 40;
                 },
             },
             {
-                name: 'Dynamic B (anchor+5)',
+                // Peaks on tip-in, lowest in decel fuel cut, 0 engine off.
+                name: 'Engine Load / air charge (raw)',
                 unit: 'raw',
                 confirmed: false,
-                decode: (bytes, anchorIdx) => {
-                    const idx = anchorIdx + 5;
-                    return idx < bytes.length ? bytes[idx] : null;
-                },
+                decode: (b) => le16(b, 11),
+            },
+            {
+                // ~71 idle, ~108 @2150, ~139 @3730 rpm. Possibly ignition advance.
+                name: 'Ignition-related (raw)',
+                unit: 'raw',
+                confirmed: false,
+                decode: (b) => u8(b, 62),
             },
         ],
     },
@@ -120,21 +169,22 @@ export const KWP_DATA_BLOCKS = {
         command: '2102',
         name: 'Secondary Data',
         responsePrefix: 0x61,
+        length: 78,
+        // Mostly zeros on SIM2K-33. The old "O2 = byte[4]×4" and
+        // "fuel trim = byte[2]" decoders were derived from truncated frames
+        // and point at bytes that are always 0 — removed. Only raw values left.
         fields: [
             {
-                name: 'O2 Sensor',
-                unit: 'mV',
-                confirmed: true,
-                decode: (bytes) => bytes[4] * 4,  // byte[4] × 4 = mV
+                name: 'Value @54 (raw, rises with rpm)',
+                unit: 'raw',
+                confirmed: false,
+                decode: (b) => le16(b, 54),
             },
             {
-                name: 'Short-Term Fuel Trim',
-                unit: '%',
-                confirmed: true,
-                decode: (bytes) => {
-                    const trim = ((bytes[2] - 128) / 128 * 100);
-                    return Math.round(trim * 10) / 10;  // ref=128 → 0%
-                },
+                name: 'Value @56 (raw, dips on transients)',
+                unit: 'raw',
+                confirmed: false,
+                decode: (b) => le16(b, 56),
             },
         ],
     },

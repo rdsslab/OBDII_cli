@@ -16,6 +16,21 @@ import { ECU_ID_SUBFUNCTIONS, KWP_DATA_BLOCKS } from './ecu-profiles.js';
 const TIMEOUT_MS = 6000;
 const INIT_TIMEOUT_MS = 12000;
 
+/**
+ * K-line ECUs keep a diagnostic session open until P3max (~5 s) elapses
+ * WITHOUT bus traffic. If the ELM327 is reset (ATZ, app restart, BT drop)
+ * while the ECU still has a session open, every new fast-init is answered
+ * with "BUS INIT: ERROR" — and retrying immediately keeps the bus busy, so
+ * the ECU never times out. We must stay silent > P3max before re-init.
+ */
+const KLINE_IDLE_RECOVERY_MS = 6000;
+const KLINE_INIT_ATTEMPTS = 3;
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+/** Informational ELM327 lines that are not ECU data. */
+const INFO_LINE = /^(BUS INIT:?\s*(OK|\.+)|SEARCHING\.*)$/i;
+
 const ELM327_ERRORS = [
     'NO DATA',
     'UNABLE TO CONNECT',
@@ -54,8 +69,15 @@ export class ELM327 {
         /** @type {object|null} ECU identification data */
         this.ecuInfo = null;
         this._testerPresentInterval = null;
-        /** Prevents Tester Present from colliding with active commands */
         this._busy = false;
+        /** Serializes access to the serial port: one command at a time. */
+        this._queue = Promise.resolve();
+        /**
+         * When true, headers are ON (ATH1) and KWP frames are decoded by us.
+         * ELM327 v1.5 clones truncate multi-line KWP responses with ATH0
+         * (they drop bytes when stripping headers), so we never rely on it.
+         */
+        this._kwpFraming = false;
     }
 
     _debug(label, value) {
@@ -166,46 +188,59 @@ export class ELM327 {
 
             // Set protocol directly (e.g. ATSP5 for KWP Fast Init)
             await this.sendRaw(`ATSP${profile.protocol.atsp}`, timeout);
+            await this._enableKwpFraming();
 
             // Give the ELM327 a moment to settle after protocol change
-            await new Promise(r => setTimeout(r, 200));
+            await sleep(200);
 
-            // Set KWP header
+            // Set KWP header + make the ELM327 send its own keep-alive
+            // (Tester Present) to this ECU. The ELM sends it only while the
+            // bus is idle, so it never collides with our commands.
             this._debug('Setting header', profile.header);
             await this.sendRaw(`AT SH ${profile.header}`, timeout);
+            await this.sendRaw(`AT WM ${profile.header} 3E`, timeout);
 
-            // Try each session type in order of preference
-            for (const session of profile.sessions) {
-                this._debug(`Trying session`, session.name);
-                const sessionResult = await this.sendRaw(session.cmd, initTimeout);
-                this._debug(`Session response`, sessionResult);
+            for (let attempt = 1; attempt <= KLINE_INIT_ATTEMPTS; attempt++) {
+                let busInitError = false;
 
-                // Positive response starts with 50
-                const isPositive = sessionResult.replace(/\s/g, '').match(/^50/);
-                if (!isPositive) continue;
+                // Try each session type in order of preference
+                for (const session of profile.sessions) {
+                    this._debug(`Trying session`, session.name);
+                    const sessionResult = await this.sendRaw(session.cmd, initTimeout);
+                    this._debug(`Session response`, sessionResult);
 
-                this._info(`✅ Session started: ${session.name}`);
-
-                // Test if OBD2 works within this session
-                const obd2Test = await this.sendRaw('0100', timeout);
-                if (!this._isError(obd2Test) && !this._isNegativeResponse(obd2Test)) {
-                    this.mode = 'obd2';
-                    this._info('OBD2 available within KWP session ✅');
-                } else {
-                    // Test KWP service 21 (readDataByLocalIdentifier)
-                    const kwp21 = await this.sendRaw('2101', timeout);
-                    if (!this._isError(kwp21) && !this._isNegativeResponse(kwp21)) {
-                        this.mode = 'kwp2000';
-                        this._info('KWP2000 service 21 available ✅');
-                    } else {
-                        this.mode = 'kwp2000';
-                        this._info('KWP2000 session active (limited services)');
+                    if (sessionResult.includes('BUS INIT: ERROR')) {
+                        busInitError = true;
+                        break; // other sessions would fail the same way
                     }
+
+                    // Positive response starts with 50
+                    if (!/^50/.test(sessionResult.replace(/\s/g, ''))) continue;
+
+                    this._info(`✅ Session started: ${session.name}`);
+
+                    // Test if OBD2 works within this session
+                    const obd2Test = await this.sendRaw('0100', timeout);
+                    if (!this._isError(obd2Test) && !this._isNegativeResponse(obd2Test)) {
+                        this.mode = 'obd2';
+                        this._info('OBD2 available within KWP session ✅');
+                    } else {
+                        // Test KWP service 21 (readDataByLocalIdentifier)
+                        const kwp21 = await this.sendRaw('2101', timeout);
+                        this.mode = 'kwp2000';
+                        if (!this._isError(kwp21) && !this._isNegativeResponse(kwp21)) {
+                            this._info('KWP2000 service 21 available ✅');
+                        } else {
+                            this._info('KWP2000 session active (limited services)');
+                        }
+                    }
+                    return true;
                 }
 
-                // Start tester present with profile-specific interval
-                this._startTesterPresent(profile.testerPresentInterval);
-                return true;
+                if (!busInitError || attempt === KLINE_INIT_ATTEMPTS) break;
+                this._warn('BUS INIT: ERROR — the ECU may still hold a previous session, or ignition is OFF.');
+                this._warn(`Waiting ${KLINE_IDLE_RECOVERY_MS / 1000}s of bus silence before retry (${attempt}/${KLINE_INIT_ATTEMPTS - 1})...`);
+                await sleep(KLINE_IDLE_RECOVERY_MS);
             }
             return false;
         } finally {
@@ -244,10 +279,12 @@ export class ELM327 {
         for (const proto of kwpProtocols) {
             this._info(`Trying ${proto.name}...`);
             await this.sendRaw(proto.cmd, TIMEOUT_MS);
+            await this._enableKwpFraming();
 
             for (const hdr of headerConfigs) {
                 this._debug('Setting header', hdr.header);
                 await this.sendRaw(`AT SH ${hdr.header}`, TIMEOUT_MS);
+                await this.sendRaw(`AT WM ${hdr.header} 3E`, TIMEOUT_MS);
 
                 for (const session of sessionCmds) {
                     const sessionResult = await this.sendRaw(session.cmd, initTimeout);
@@ -270,7 +307,6 @@ export class ELM327 {
                     if (!this._isError(obd2Retry) && !this._isNegativeResponse(obd2Retry)) {
                         this.mode = 'obd2';
                         this._info('OBD2 works with KWP session ✅');
-                        this._startTesterPresent();
                         return;
                     }
 
@@ -280,7 +316,6 @@ export class ELM327 {
                     if (!this._isError(kwp21) && !this._isNegativeResponse(kwp21)) {
                         this.mode = 'kwp2000';
                         this._info('KWP2000 service 21 works ✅');
-                        this._startTesterPresent();
                         return;
                     }
 
@@ -290,7 +325,6 @@ export class ELM327 {
                     if (!this._isError(kwp18) && !this._isNegativeResponse(kwp18)) {
                         this.mode = 'kwp2000';
                         this._info('KWP2000 service 18 works ✅');
-                        this._startTesterPresent();
                         return;
                     }
 
@@ -300,7 +334,6 @@ export class ELM327 {
                     if (!this._isError(kwp13) && !this._isNegativeResponse(kwp13)) {
                         this.mode = 'kwp2000';
                         this._info('KWP2000 service 13 works ✅');
-                        this._startTesterPresent();
                         return;
                     }
                 }
@@ -308,31 +341,75 @@ export class ELM327 {
         }
 
         this.mode = 'unknown';
+        await this._disableKwpFraming();
         this._warn('Could not establish KWP2000 session.');
         this._warn('Use "Scan ECU Services" (option 15) and "Custom Command" to explore.');
     }
 
     /**
-     * Send periodic "Tester Present" (3E) to keep KWP session alive.
+     * Keep-alive is delegated to the ELM327 itself (AT WM <hdr> 3E): it sends
+     * the wakeup message only while the bus is idle. A JS setInterval that
+     * writes "3E" races with user commands on the same serial port and
+     * corrupts responses, so it is no longer used.
      */
-    _startTesterPresent(intervalMs = 2500) {
-        if (this._testerPresentInterval) return;
-        this._testerPresentInterval = setInterval(async () => {
-            try {
-                // Don't send while another command is in progress
-                if (this._busy) return;
-                if (this.port && this.port.isOpen) {
-                    await this.sendRaw('3E', 2000);
-                }
-            } catch { /* ignore */ }
-        }, intervalMs);
-    }
-
     _stopTesterPresent() {
         if (this._testerPresentInterval) {
             clearInterval(this._testerPresentInterval);
             this._testerPresentInterval = null;
         }
+    }
+
+    async _enableKwpFraming() {
+        await this.sendRaw('ATH1', TIMEOUT_MS);
+        this._kwpFraming = true;
+    }
+
+    async _disableKwpFraming() {
+        this._kwpFraming = false;
+        await this.sendRaw('ATH0', TIMEOUT_MS);
+    }
+
+    /**
+     * Decode KWP2000 (ISO 14230) frames shown with ATH1 into data bytes only.
+     * Frame: [fmt] [tgt] [src] ([len]) data... [checksum]
+     *   fmt bits 7-6 = address mode (00 = no address bytes)
+     *   fmt bits 5-0 = data length (0 => extra length byte follows)
+     * ELM327 wraps long frames over several lines, so all hex is joined first.
+     * Returns one string per ECU message ("58 03 15 35 E1 ..."), or null if
+     * the bytes don't form valid frames (caller then keeps the raw text).
+     */
+    static decodeKwpFrames(text) {
+        const bytes = (text.match(/\b[0-9A-F]{2}\b/gi) || []).map(h => parseInt(h, 16));
+        if (bytes.length === 0) return null;
+        const messages = [];
+        let i = 0;
+        while (i < bytes.length) {
+            const start = i;
+            const fmt = bytes[i++];
+            if ((fmt & 0xC0) !== 0) i += 2;          // target + source
+            let len = fmt & 0x3F;
+            if (len === 0) len = bytes[i++];          // extra length byte
+            if (len === undefined || i + len >= bytes.length) return null; // incomplete
+            const data = bytes.slice(i, i + len);
+            i += len;
+            const cs = bytes[i++];
+            const sum = bytes.slice(start, i - 1).reduce((a, b) => (a + b) & 0xFF, 0);
+            if (cs !== sum) return null;
+            messages.push(data.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' '));
+        }
+        return messages;
+    }
+
+    /**
+     * Clean an ELM327 response: drop informational lines (BUS INIT: OK,
+     * SEARCHING...) and, in KWP framing mode, strip headers/checksums.
+     */
+    _normalizeResponse(command, response) {
+        const lines = response.split('\n').map(l => l.trim()).filter(l => l && !INFO_LINE.test(l));
+        const cleaned = lines.join('\n');
+        if (!this._kwpFraming || /^AT/i.test(command) || this._isError(cleaned)) return cleaned;
+        const decoded = ELM327.decodeKwpFrames(cleaned);
+        return decoded ? decoded.join('\n') : cleaned;
     }
 
     _isError(response) {
@@ -353,6 +430,13 @@ export class ELM327 {
      * Send a raw command and collect ALL data until the '>' prompt.
      */
     sendRaw(command, timeout = TIMEOUT_MS) {
+        const run = () => this._sendRawNow(command, timeout);
+        const p = this._queue.then(run, run);
+        this._queue = p.catch(() => {});
+        return p;
+    }
+
+    _sendRawNow(command, timeout) {
         return new Promise((resolve) => {
             if (!this.port) {
                 resolve('ERROR: Not connected');
@@ -388,7 +472,7 @@ export class ELM327 {
                     this._debug('TX', command);
                     this._debug('RX', response || '(empty)');
 
-                    finish(response);
+                    finish(this._normalizeResponse(command, response));
                 }
             };
 
@@ -419,31 +503,16 @@ export class ELM327 {
             const response = await this.sendRaw(command);
 
             if (this._isError(response)) {
-                // If bus initialization failed and we have a profile, try to re-init and retry ONCE
+                // Bus init failed: the ECU dropped/kept a stale session. Retrying
+                // immediately (or ATZ) keeps the K-line busy and never recovers;
+                // wait for bus silence, then _initWithProfile (which also retries).
                 if (response.includes('BUS INIT: ERROR') && this.profile && !isRetry) {
-                    this._warn('Bus initialization lost. Attempting auto-recovery...');
-
-                    // Force a hard reset if several failures occur? 
-                    // For now, simple re-init is often enough.
+                    this._warn('Bus initialization lost. Waiting for ECU session timeout, then re-init...');
+                    await sleep(KLINE_IDLE_RECOVERY_MS);
                     const reinitOk = await this._initWithProfile(this.profile);
                     if (reinitOk) {
                         this._info('Bus recovered. Retrying command...');
                         return this.sendCommand(command, true);
-                    } else {
-                        // If re-init failed, try a hard reset: reset ELM327 + full re-config
-                        this._warn('Auto-recovery failed. Trying hard reset...');
-                        await this.sendRaw('ATZ', INIT_TIMEOUT_MS);
-                        // Wait for ELM327 to reboot fully
-                        await new Promise(r => setTimeout(r, 1000));
-                        // Re-apply base configuration (ATZ clears all settings!)
-                        await this.sendRaw('ATE0', TIMEOUT_MS);  // echo off
-                        await this.sendRaw('ATL0', TIMEOUT_MS);  // linefeeds off
-                        await this.sendRaw('ATS1', TIMEOUT_MS);  // spaces on
-                        await this.sendRaw('ATH0', TIMEOUT_MS);  // headers off
-                        await this.sendRaw('ATAT2', TIMEOUT_MS); // adaptive timing
-                        await this.sendRaw('ATST 96', TIMEOUT_MS); // timeout ~1.5s
-                        const secondChance = await this._initWithProfile(this.profile);
-                        if (secondChance) return this.sendCommand(command, true);
                     }
                 }
                 return { success: false, data: response, error: response };
@@ -568,16 +637,13 @@ export class ELM327 {
             return { success: false, bytes: [], raw: cleanResult };
         }
 
-        // Try to find positive response header (0x61 = response to service 0x21)
-        const headerIdx = bytes.indexOf(0x61);
-        let dataBytes;
-        if (headerIdx !== -1 && headerIdx + 1 < bytes.length) {
-            // Standard format: 61 [blockId] [data...]
-            dataBytes = bytes.slice(headerIdx + 2);
-        } else {
-            // ELM327 clone with ATH0: response header stripped, all bytes are data
-            dataBytes = bytes;
+        // Positive response: 61 [blockId] [data...]. With KWP framing the
+        // response always starts there; anything else is not this block.
+        const expectedId = parseInt(blockId, 16);
+        if (bytes[0] !== 0x61 || bytes[1] !== expectedId) {
+            return { success: false, bytes: [], raw: cleanResult, error: `Unexpected response: ${cleanResult.substring(0, 40)}` };
         }
+        const dataBytes = bytes.slice(2);
 
         return { success: dataBytes.length > 0, bytes: dataBytes, raw: result };
     }
@@ -592,30 +658,15 @@ export class ELM327 {
         const result = await this.readKWPDataBlock(blockDef.id);
         if (!result.success) return [];
 
+        // Fixed-position layout: a different length means a different layout.
+        if (blockDef.length && result.bytes.length !== blockDef.length) return [];
+
         const parsed = [];
-        const len = result.bytes.length;
-
         for (const field of blockDef.fields) {
-            // Resolve offset: negative = from end, positive = from start
-            const resolvedOffset = field.offset < 0 ? len + field.offset : field.offset;
-
-            if (resolvedOffset < 0 || resolvedOffset >= len) continue;
-
             try {
-                let value;
-                if (field.length === 1) {
-                    value = field.parse(result.bytes[resolvedOffset]);
-                } else if (field.length === 2) {
-                    const a = result.bytes[resolvedOffset];
-                    const b = result.bytes[resolvedOffset + 1] || 0;
-                    value = field.parse(a, b);
-                }
-
-                if (value !== null && value !== undefined && !isNaN(value)) {
-                    if (typeof value === 'number') {
-                        value = Math.round(value * 100) / 100;
-                    }
-                    parsed.push({ name: field.name, value, unit: field.unit });
+                const value = field.decode(result.bytes);
+                if (value !== null && value !== undefined) {
+                    parsed.push({ name: field.name, value, unit: field.unit, confirmed: !!field.confirmed });
                 }
             } catch {
                 // Skip fields that can't be parsed
@@ -633,8 +684,12 @@ export class ELM327 {
         if (this.port) {
             try {
                 if (this.port.isOpen) {
-                    this.port.write('ATZ\r');
-                    await new Promise(r => setTimeout(r, 300));
+                    // KWP stopCommunication: the next run can fast-init right
+                    // away instead of waiting for the ECU's P3 timeout.
+                    if (this._kwpFraming && this.mode !== 'unknown') {
+                        await this.sendRaw('82', 2000);
+                    }
+                    await this.sendRaw('ATZ', 2000);
                 }
             } catch { /* ignore */ }
             await disconnect(this.port);

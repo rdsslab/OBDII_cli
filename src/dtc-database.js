@@ -35,6 +35,45 @@ export const dtcDatabase = {
         "solutions": ["Revisar estado de bujías y cambiarlas si es necesario", "Revisar bobinas de encendido", "Verificar inyectores"],
         "risks": "Destrucción del convertidor catalítico (catalizador) en poco tiempo, pérdida drástica de potencia."
     },
+    "P0335": {
+        "description": "Crankshaft Position Sensor 'A' Circuit",
+        "explanation": "La ECU no recibe (o recibe incorrecta) la señal del sensor de posición del cigüeñal (CKP), que usa para calcular RPM y sincronizar encendido e inyección.",
+        "causes": ["Sensor CKP dañado", "Conector o cableado del CKP flojo, sulfatado o roto", "Rueda fónica dañada o sucia", "Se registró al dar arranque con batería baja o al apagar el motor con el contacto puesto"],
+        "solutions": ["Revisar conector y cableado del sensor CKP", "Medir resistencia/señal del sensor con multímetro u osciloscopio", "Verificar el entrehierro y la rueda fónica", "Reemplazar el sensor si la señal es incorrecta"],
+        "risks": "El motor puede no arrancar, apagarse en marcha o presentar tirones si el fallo se vuelve permanente."
+    },
+    "P0501": {
+        "description": "Vehicle Speed Sensor 'A' Range/Performance",
+        "explanation": "La señal del sensor de velocidad del vehículo (VSS) es incoherente con las demás condiciones de marcha (por ejemplo, 0 km/h con carga y RPM de conducción).",
+        "causes": ["Sensor VSS defectuoso o sucio", "Cableado o conector del VSS dañado", "Engranaje impulsor del sensor desgastado", "Señal intermitente por masa deficiente"],
+        "solutions": ["Comprobar que el velocímetro funcione", "Revisar conector, cableado y masa del VSS", "Medir la señal del sensor girando las ruedas", "Reemplazar el sensor o su engranaje"],
+        "risks": "Velocímetro errático, ralentí inestable al detenerse y posibles fallos en el control de la caja automática."
+    },
+    // ── GM-Wuling (ECU Siemens VDO SIM2K-33) manufacturer-specific codes ──
+    // Source: Wuling fault-code table "五菱汽车故障码大全"
+    // (360doc.com/content/17/1112/14/49534302_703136707.shtml). Generic
+    // definitions from other makes (e.g. GM "A/C high side temp") don't apply.
+    "P1535": {
+        "description": "A/C Evaporator Temperature Sensor Circuit High — short to power or open (GM-Wuling)",
+        "explanation": "La ECU mide la señal del sensor de temperatura del evaporador del A/C y la encuentra por encima del rango: el circuito está abierto o en corto a +12 V. IMPORTANTE: si el vehículo NO tiene aire acondicionado, el sensor no existe y el circuito queda abierto, por lo que la ECU registra este código de forma permanente. En ese caso suele indicar que la ECU está configurada para la versión con A/C (o proviene de otra versión), no una avería real.",
+        "causes": ["Vehículo sin A/C con ECU configurada/calibrada para versión con A/C (circuito del sensor inexistente = abierto)", "ECU de reemplazo procedente de una versión con A/C", "En vehículos con A/C: sensor del evaporador desconectado o dañado", "En vehículos con A/C: cable cortado o en corto a +12 V, conector oxidado"],
+        "solutions": ["Confirmar si el vehículo tiene A/C de fábrica", "Sin A/C: hacer que un taller con herramienta para Wuling/SIM2K verifique la configuración (variante) de la ECU", "Con A/C: revisar el conector de 2 cables del sensor en la caja del evaporador y la continuidad hasta la ECU según el diagrama eléctrico", "Borrar el código y comprobar si reaparece de inmediato (presente = circuito abierto permanente)"],
+        "risks": "Sin A/C no afecta al funcionamiento del motor, pero mantiene un código activo que puede encender la MIL y ocultar fallos nuevos. Con A/C, la ECU puede bloquear el compresor."
+    },
+    "P1536": {
+        "description": "A/C Evaporator Temperature Sensor Circuit Low — short to ground (GM-Wuling)",
+        "explanation": "La señal del sensor de temperatura del evaporador del A/C está por debajo del rango: el circuito está en corto a masa.",
+        "causes": ["Cable de señal del sensor en corto a masa", "Sensor del evaporador en corto interno", "Mazo dañado o rozado contra la carrocería"],
+        "solutions": ["Desconectar el sensor y comprobar si el código cambia", "Revisar el mazo del sensor buscando roces o aislamiento dañado", "Medir la resistencia del sensor y reemplazarlo si está en corto"],
+        "risks": "La ECU puede inhibir el compresor del A/C."
+    },
+    "P1545": {
+        "description": "A/C High Pressure Switch or A/C Compressor Relay Circuit (GM-Wuling)",
+        "explanation": "La ECU detecta una falla en el circuito del presostato de alta presión del A/C o en el circuito del relé del compresor del A/C, que en este vehículo controla el módulo del motor.",
+        "causes": ["Presostato de alta dañado o desconectado", "Relé del compresor defectuoso", "Cableado o conectores del circuito del A/C en mal estado"],
+        "solutions": ["Revisar el relé del compresor y su alimentación", "Comprobar el presostato de alta y su conector", "Verificar continuidad del cableado hasta la ECU"],
+        "risks": "El compresor del A/C puede no activarse."
+    },
     "P0340": {
         "description": "Camshaft Position Sensor 'A' Circuit",
         "explanation": "La ECU no recibe la señal correcta del sensor de posición del árbol de levas.",
