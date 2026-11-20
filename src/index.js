@@ -688,6 +688,161 @@ async function readKWPLiveData() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Real-time monitor
+// ═══════════════════════════════════════════════════════════════
+
+/** Full-scale values for the bar graph, by unit. */
+const BAR_SCALE = { RPM: 7000, '%': 100, kPa: 105 };
+
+function bar(value, unit, width = 20) {
+    const max = BAR_SCALE[unit];
+    if (!max || typeof value !== 'number') return ''.padEnd(width + 2);
+    const n = Math.max(0, Math.min(width, Math.round(value / max * width)));
+    return `${C.green}${'█'.repeat(n)}${C.dim}${'░'.repeat(width - n)}${C.reset}  `;
+}
+
+function fmtNum(v) {
+    if (typeof v !== 'number') return String(v ?? '—');
+    return Number.isInteger(v) ? String(v) : v.toFixed(1);
+}
+
+/**
+ * Build a "sampler" that returns one snapshot of all live values:
+ *   KWP profile → decoded fields of block 2101 (one request per refresh)
+ *   OBD2        → each standard sensor PID that answered on the first pass
+ */
+async function buildLiveSampler() {
+    if (elm327.mode === 'kwp2000') {
+        const blockDef = KWP_DATA_BLOCKS.BLOCK_01;
+        return {
+            source: `KWP2000 bloque ${blockDef.command}`,
+            sample: async () => {
+                const fields = await elm327.readKWPParsedBlock(blockDef);
+                return fields.length ? fields : null;
+            },
+        };
+    }
+
+    // OBD2: probe once, then poll only the PIDs that answered.
+    const working = [];
+    for (const key of SENSOR_COMMANDS) {
+        const cmd = OBD2_COMMANDS[key];
+        const r = await elm327.sendCommand(cmd.command);
+        if (r.success) {
+            try { if (cmd.parse(r.data) != null) working.push(cmd); } catch { /* skip */ }
+        }
+    }
+    if (working.length === 0) return null;
+    return {
+        source: `OBD2 (${working.length} PIDs)`,
+        sample: async () => {
+            const out = [];
+            for (const cmd of working) {
+                const r = await elm327.sendCommand(cmd.command);
+                let value = null;
+                if (r.success) { try { value = cmd.parse(r.data); } catch { /* skip */ } }
+                if (typeof value === 'object' && value !== null) value = value.text ?? JSON.stringify(value);
+                out.push({ name: cmd.name, value, unit: cmd.unit, confirmed: true });
+            }
+            return out;
+        },
+    };
+}
+
+async function liveMonitor(rl) {
+    printSeparator('Datos en tiempo real');
+
+    const saveCsv = /^s/i.test(await ask(rl, '  ¿Guardar los datos en CSV? (s/N): '));
+
+    const prevDebug = elm327.debug;
+    elm327.debug = false; // TX/RX traces would break the in-place redraw
+
+    try {
+        printInfo('Preparando lectura...');
+        const sampler = await buildLiveSampler();
+        if (!sampler) {
+            printWarning('La ECU no devolvió datos en vivo. ¿Está el contacto en ON?');
+            return;
+        }
+
+        let csv = null;
+        let csvFile = null;
+        let stop = false;
+        const onLine = () => { stop = true; };
+        rl.once('line', onLine);
+
+        console.log(`  ${C.dim}Fuente: ${sampler.source} — presiona ${C.reset}${C.bold}Enter${C.reset}${C.dim} para detener.${C.reset}`);
+        console.log();
+
+        const stats = new Map(); // name -> {min, max}
+        const t0 = Date.now();
+        let frames = 0;
+        let failures = 0;
+        let drawnLines = 0;
+
+        while (!stop) {
+            const tFrame = Date.now();
+            const values = await sampler.sample();
+
+            const lines = [];
+            if (!values) {
+                failures++;
+                lines.push(`  ${C.yellow}⚠ Sin respuesta (${failures})${C.reset}`);
+                if (failures >= 3 && elm327.profile) {
+                    lines.push(`  ${C.yellow}  Sesión perdida: esperando 6 s y reconectando...${C.reset}`);
+                }
+            } else {
+                failures = 0;
+                frames++;
+                if (saveCsv && !csv) {
+                    csvFile = `live_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+                    csv = fs.createWriteStream(csvFile);
+                    csv.write(['t_ms', ...values.map(v => (v.unit ? `${v.name} (${v.unit})` : v.name))].map(h => `"${h}"`).join(',') + '\n');
+                }
+                if (csv) csv.write([tFrame - t0, ...values.map(v => v.value ?? '')].join(',') + '\n');
+
+                const elapsed = (Date.now() - t0) / 1000;
+                lines.push(`  ${C.dim}${elapsed.toFixed(0).padStart(4)} s · ${frames} lecturas · ${(frames / Math.max(elapsed, 0.001)).toFixed(1)} Hz${C.reset}${csv ? `  ${C.dim}· CSV: ${csvFile}${C.reset}` : ''}`);
+                lines.push(`  ${C.dim}${'Sensor'.padEnd(32)} ${'Valor'.padStart(9)} ${'Unidad'.padEnd(6)} ${''.padEnd(22)}${'Mín'.padStart(7)} ${'Máx'.padStart(7)}${C.reset}`);
+                for (const v of values) {
+                    let s = stats.get(v.name);
+                    if (typeof v.value === 'number') {
+                        if (!s) { s = { min: v.value, max: v.value }; stats.set(v.name, s); }
+                        s.min = Math.min(s.min, v.value);
+                        s.max = Math.max(s.max, v.value);
+                    }
+                    const color = v.confirmed ? C.bold : C.dim;
+                    const name = (v.confirmed ? v.name : `? ${v.name}`).slice(0, 32).padEnd(32);
+                    lines.push(`  ${color}${name}${C.reset} ${color}${fmtNum(v.value).padStart(9)}${C.reset} ${C.dim}${(v.unit || '').padEnd(6)}${C.reset} ${bar(v.value, v.unit)}${C.dim}${(s ? fmtNum(s.min) : '').padStart(7)} ${(s ? fmtNum(s.max) : '').padStart(7)}${C.reset}`);
+                }
+                lines.push(`  ${C.dim}? = valor sin confirmar (por calibrar)${C.reset}`);
+            }
+
+            // Redraw in place
+            if (drawnLines) process.stdout.write(`\x1b[${drawnLines}A`);
+            for (const l of lines) process.stdout.write(`\x1b[2K${l}\n`);
+            for (let i = lines.length; i < drawnLines; i++) process.stdout.write('\x1b[2K\n');
+            drawnLines = Math.max(lines.length, drawnLines);
+
+            if (!values && failures >= 3 && elm327.profile) {
+                const ok = await elm327.recoverSession();
+                failures = ok ? 0 : failures;
+            } else if (!values) {
+                await sleep(1000);
+            }
+        }
+
+        rl.removeListener('line', onLine);
+        if (csv) await new Promise(r => csv.end(r));
+        console.log();
+        printSuccess(`Monitor detenido: ${frames} lecturas en ${((Date.now() - t0) / 1000).toFixed(0)} s`);
+        if (csvFile) printInfo(`Datos guardados en ${csvFile}`);
+    } finally {
+        elm327.debug = prevDebug;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Main Menu
 // ═══════════════════════════════════════════════════════════════
 
@@ -712,6 +867,7 @@ function printMenu() {
     console.log(`  ${C.cyan}17.${C.reset} 📈  Read KWP Data Blocks (Live)`);
     console.log(`  ${C.cyan}18.${C.reset} 🗑️   Borrar Códigos de Error (Español)`);
     console.log(`  ${C.cyan}19.${C.reset} 💾  Guardar DTCs en archivo de texto`);
+    console.log(`  ${C.cyan}20.${C.reset} ⏱️   Datos en tiempo real (monitor)`);
     console.log(`  ${C.cyan} 0.${C.reset} ❌  Disconnect & Exit`);
     console.log();
 }
@@ -799,8 +955,11 @@ async function handleMenuChoice(rl, choice) {
         case '19':
             await saveDTCs(rl);
             break;
+        case '20':
+            await liveMonitor(rl);
+            break;
         default:
-            printError('Invalid option. Please select 0-19.');
+            printError('Invalid option. Please select 0-20.');
     }
 }
 

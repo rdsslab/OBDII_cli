@@ -80,7 +80,7 @@ El código está estructurado de manera modular y limpia:
 4. **Inicialización:**
    - La aplicación detectará el protocolo del coche automáticamente.
    - Si la ECU requiere configuraciones especiales (como KWP2000), el motor intentará asociar un perfil predefinido o probará diferentes cabeceras físicas.
-5. **Menú Interactivo:** Utiliza las opciones numéricas del `0` al `19` para interactuar con los sistemas del vehículo.
+5. **Menú Interactivo:** Utiliza las opciones numéricas del `0` al `20` para interactuar con los sistemas del vehículo.
 
 ---
 
@@ -99,6 +99,7 @@ El código está estructurado de manera modular y limpia:
 | `16` | **Read ECU Info (KWP 1A)**: Muestra información del hardware, software, proveedor y número de parte grabados en la ECU. |
 | `17` | **Read KWP Data Blocks**: Muestra un volcado hexadecimal y decimal estructurado de los bloques de datos KWP en vivo. |
 | `19` | **Guardar DTCs en HTML**: Genera un archivo `.html` auto-contenido con el diagnóstico detallado. |
+| `20` | **Datos en tiempo real (monitor)**: Tablero que se actualiza en el mismo lugar (~3–4 lecturas/s en KWP) con valor, barra, mínimo y máximo de cada sensor. Opcionalmente graba un archivo `live_<fecha>.csv`. Se detiene con Enter; si se pierde la sesión, reconecta solo. |
 | `0` | **Disconnect & Exit**: Cierra la sesión de diagnóstico, restablece el ELM327 a su modo por defecto (`ATZ`) y sale limpiamente. |
 
 ---

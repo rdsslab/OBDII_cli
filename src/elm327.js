@@ -649,6 +649,17 @@ export class ELM327 {
     }
 
     /**
+     * Re-open the KWP session after it was lost (ignition cycled, BT hiccup).
+     * Waits for K-line silence first so a stale ECU session can time out.
+     * @returns {Promise<boolean>}
+     */
+    async recoverSession() {
+        if (!this.profile) return false;
+        await sleep(KLINE_IDLE_RECOVERY_MS);
+        return this._initWithProfile(this.profile);
+    }
+
+    /**
      * Read and parse a KWP data block using field definitions from the profile.
      * 
      * @param {object} blockDef - Block definition from KWP_DATA_BLOCKS
