@@ -267,6 +267,14 @@ Con la opción B, el núcleo necesita un transporte "KWP crudo" además del de c
    - `apps/pwa`: compilación sin dependencias (*import map*), manifiesto, íconos, service worker para uso sin conexión y workflow de GitHub Pages.
    - Publicada en https://rdsslab.github.io/OBDII_cli/ (GitHub Pages, workflow `Publish PWA`).
    - Probado con un puerto Web Serial simulado en Node y en Chrome headless (sin errores, instalable). **Falta probarlo con el ELM327 real**: en Chrome de la laptop (COM6) y en el teléfono.
+3b. ✅ **Alertas, sonido y calibración GPS (2026-11-20).**
+   - `packages/core/src/alerts.js`: 11 alertas con umbrales configurables.
+   - `packages/ui`: avisos en pantalla, pitidos con Web Audio, voces WAV en español e inglés generadas con Windows TTS, vibración, notificaciones y pantalla encendida.
+   - `ObdSession`:
+     - relee los códigos cada 3 min durante el tiempo real;
+     - nuevo modo «vigilar batería» (solo `ATRV`);
+     - evento `ecu-link` para la alerta de comunicación perdida.
+   - Calibración GPS de la velocidad en la PWA, con CSV para analizar.
 4. **`obd-android`.** Capacitor + plugin Bluetooth serie; probar en el teléfono y luego en el radio.
 5. **`obd-esp32`.** Hardware propio sin ELM327. Necesita los pasos 1 y 2 (el core y `obd-ui`) si se sigue la opción B. El trabajo del hardware y del firmware se puede adelantar en paralelo.
 

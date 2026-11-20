@@ -48,7 +48,9 @@ const pinGuard = { fails: 0, lockedUntil: 0 };
 
 // ── Shared session ────────────────────────────────────────────
 function makeTransport(portPath) {
-    if (args.sim && portPath === 'SIM') return new SimTransport({ vary: true, latencyMs: 25, hangAfter: Number(args['sim-hang']) || 0 });
+    if (args.sim && portPath === 'SIM') {
+        return new SimTransport({ vary: true, latencyMs: 25, hangAfter: Number(args['sim-hang']) || 0, scenario: args['sim-scenario'] || null });
+    }
     if (args.sim && portPath === 'SIM-OFF') return new SimTransport({ engineOff: true, latencyMs: 25 });
     return new NodeSerialTransport(portPath);
 }
@@ -67,6 +69,7 @@ session
     .on('live', (s) => broadcast('live', s))
     .on('dtcs', (d) => broadcast('dtcs', d))
     .on('ecu-info', (d) => broadcast('ecu-info', d))
+    .on('ecu-link', (d) => broadcast('ecu-link', d))
     .on('log', (entry) => {
         (entry.level === 'warn' ? console.warn : console.log)(`[${new Date(entry.t).toLocaleTimeString()}] ${entry.msg}`);
         broadcast('log', entry);
@@ -101,7 +104,7 @@ async function clearDtcs(pin, who) {
 const MIME = {
     '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
     '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml',
-    '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json',
+    '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json', '.wav': 'audio/wav',
 };
 
 function sendJson(res, status, data) {
@@ -151,6 +154,11 @@ const routes = {
         return publicState();
     },
     'POST /api/disconnect': async () => { await session.disconnect(); return publicState(); },
+    'POST /api/battery-watch': async (body) => {
+        if (!body.port || !/^[\w./\\:-]+$/.test(body.port)) throw Object.assign(new Error('Puerto inválido'), { status: 400 });
+        await session.watchBattery(body.port);
+        return publicState();
+    },
     'GET /api/voltage': () => session.readVoltage(),
     'GET /api/dtcs': () => session.readDtcs(),
     'GET /api/dtcs/last': () => session.lastDtcs,

@@ -183,6 +183,6 @@ Fuente de P1535/P1536/P1545: tabla Wuling "五菱汽车故障码大全" (360doc)
 - [ ] Ubicar la fuente original de la tabla SIMK43 y revisarla directamente.
 - [ ] Buscar la calibración por `KR77175201` / `KR77175112` / `W1102S52`.
 - [ ] Ejecutar el plan de confirmación §3 (solo lectura).
-- [ ] Fijar la escala de la velocidad: opción 20 con CSV a velocidad constante, anotando el velocímetro.
+- [ ] Fijar la escala de la velocidad con **Ajustes → Calibración de velocidad (GPS)** en la PWA del teléfono. El CSV incluye el bloque 2101 completo y el resumen indica qué byte sigue mejor al GPS (la velocidad actual, byte 18, es sospechosa por P0501).
 - [ ] Nivel de combustible: CSV antes y después de cargar.
 - [ ] Probar el servicio `21 F0` en otras condiciones (¿motor en marcha?).

@@ -2,9 +2,9 @@
  * RemoteClient: the UI talks to @obdii/server over HTTP + Server-Sent Events.
  *
  * Client contract shared with future clients (PWA DirectClient, Android):
- *   on(event, cb)   events: 'state', 'live', 'dtcs', 'ecu-info', 'log', 'link'
+ *   on(event, cb)   events: 'state', 'live', 'dtcs', 'ecu-info', 'log', 'ecu-link', 'link'
  *   start()
- *   listPorts(), listProfiles(), connect(port, profile), disconnect()
+ *   listPorts(), listProfiles(), connect(port, profile), disconnect(), watchBattery(port)
  *   readVoltage(), readDtcs(), readEcuInfo(), startLive(), stopLive()
  *   clearDtcs(pin)  (only when state.clearEnabled; the one write to the ECU)
  *   reportUrl()  (null when the platform has no server-side report)
@@ -30,7 +30,7 @@ export class RemoteClient {
         const es = new EventSource(`${this.baseUrl}/api/events`);
         es.onopen = () => this._emit('link', { online: true });
         es.onerror = () => this._emit('link', { online: false });
-        for (const ev of ['state', 'live', 'dtcs', 'ecu-info', 'log']) {
+        for (const ev of ['state', 'live', 'dtcs', 'ecu-info', 'log', 'ecu-link']) {
             es.addEventListener(ev, (e) => this._emit(ev, JSON.parse(e.data)));
         }
         this.es = es;
@@ -51,6 +51,7 @@ export class RemoteClient {
     listProfiles() { return this._req('GET', '/api/profiles'); }
     connect(port, profile) { return this._req('POST', '/api/connect', { port, profile }); }
     disconnect() { return this._req('POST', '/api/disconnect'); }
+    watchBattery(port) { return this._req('POST', '/api/battery-watch', { port }); }
     readVoltage() { return this._req('GET', '/api/voltage'); }
     readDtcs() { return this._req('GET', '/api/dtcs'); }
     clearDtcs(pin) { return this._req('POST', '/api/dtcs/clear', { pin }); }

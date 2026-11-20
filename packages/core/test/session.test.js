@@ -70,3 +70,27 @@ test('session: linkLost() puts the session in error and stops live data', async 
     assert.equal(session.state.live.running, false);
     await assert.rejects(() => session.readDtcs(), /No hay conexión/);
 });
+
+test('session: periodic DTC re-read during live data', async () => {
+    const session = new ObdSession({ makeTransport: () => new SimTransport({ engineOff: true }), dtcPollMs: 600 });
+    let dtcEvents = 0;
+    session.on('dtcs', () => dtcEvents++);
+    await session.connect('SIM-OFF', 'SIM2K_33');
+    await session.startLive();
+    await until(() => dtcEvents >= 2, 10000);
+    await session.disconnect();
+});
+
+test('session: battery watch reads ATRV without the ECU, then disconnects', async () => {
+    const session = new ObdSession({ makeTransport: () => new SimTransport(), batteryWatchMs: 300 });
+    const live = [];
+    session.on('live', s => live.push(s));
+    await session.watchBattery('SIM');
+    assert.equal(session.state.status, 'watch');
+    await until(() => live.length >= 2, 5000);
+    assert.deepEqual(live[0].fields.map(f => f.name), ['Battery Voltage (ELM327)']);
+    assert.equal(live[0].fields[0].value, 12.3);
+    await assert.rejects(() => session.connect('SIM', 'SIM2K_33'), /Ya conectado/);
+    await session.disconnect();
+    assert.equal(session.state.status, 'disconnected');
+});

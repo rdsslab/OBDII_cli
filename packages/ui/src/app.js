@@ -4,13 +4,15 @@
  * the Android app). See clients/remote-client.js for the contract.
  */
 import { meta } from './labels.js';
+import { startAlerts } from './alerts-ui.js';
+import { startCalibration } from './calibration-ui.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (v) => typeof v === 'number' ? (Number.isInteger(v) ? String(v) : v.toFixed(1)) : String(v ?? '—');
 const timeStr = (t) => new Date(t).toLocaleTimeString();
 
-const STATUS_TEXT = { disconnected: 'Desconectado', connecting: 'Conectando…', connected: 'Conectado', error: 'Error', offline: 'Sin servidor' };
+const STATUS_TEXT = { disconnected: 'Desconectado', connecting: 'Conectando…', connected: 'Conectado', watch: 'Vigilando batería', error: 'Error', offline: 'Sin servidor' };
 const MODE_TEXT = { kwp2000: 'KWP2000 (ISO 14230)', obd2: 'OBD2 estándar', unknown: 'sin respuesta' };
 
 export function startApp(client) {
@@ -80,8 +82,11 @@ export function startApp(client) {
         $('connError').hidden = !state.error;
         $('connError').textContent = state.error || '';
 
-        $('connect').disabled = busy || connected || state.status === 'connecting' || !$('port').value;
-        $('disconnect').disabled = busy || !(connected || state.status === 'error');
+        const watching = state.status === 'watch';
+        $('connect').disabled = busy || connected || watching || state.status === 'connecting' || !$('port').value;
+        $('disconnect').disabled = busy || !(connected || watching || state.status === 'error');
+        $('watchBattery').hidden = typeof client.watchBattery !== 'function';
+        $('watchBattery').disabled = busy || connected || watching || state.status === 'connecting' || !$('port').value;
         $('readDtc').disabled = busy || !connected;
         const canClear = !!state.clearEnabled && typeof client.clearDtcs === 'function';
         $('clearDtc').hidden = !canClear;
@@ -137,6 +142,10 @@ export function startApp(client) {
         if (state.status === 'connected') toast('Conectado');
     }));
     $('disconnect').addEventListener('click', () => run($('disconnect'), () => client.disconnect()));
+    $('watchBattery').addEventListener('click', () => run($('watchBattery'), async () => {
+        await client.watchBattery($('port').value);
+        if (state.status === 'watch') toast('Vigilando la batería cada 30 s');
+    }));
 
     // ── Live data ─────────────────────────────────────────────
     $('liveToggle').addEventListener('click', () => run($('liveToggle'), async () => {
@@ -331,6 +340,9 @@ export function startApp(client) {
         ? 'Pon el contacto en ON antes de conectar. La conexión es compartida: todos los dispositivos ven la misma sesión.'
         : 'Pon el contacto en ON antes de conectar. Este dispositivo se conecta directo al ELM327.';
     $('unsupported').hidden = caps.webSerial !== false;
+
+    const alerts = startAlerts(client, { toast, onLog: addLog });
+    startCalibration(client, { toast, onLog: addLog, getState: () => state, alerts });
 
     renderDtcs(null);
     renderEcu(null);

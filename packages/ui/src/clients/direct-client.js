@@ -30,7 +30,7 @@ export class DirectClient {
             },
             describePort: (port) => describeSerialPort(port),
         });
-        for (const ev of ['live', 'dtcs', 'ecu-info', 'log']) this.session.on(ev, (d) => this._emit(ev, d));
+        for (const ev of ['live', 'dtcs', 'ecu-info', 'log', 'ecu-link']) this.session.on(ev, (d) => this._emit(ev, d));
         this.session.on('state', () => this._emit('state', this._state()));
         if (isWebSerialSupported()) {
             navigator.serial.addEventListener('disconnect', (e) => {
@@ -74,15 +74,22 @@ export class DirectClient {
 
     async listProfiles() { return listProfiles(); }
 
-    async connect(path, profile) {
-        let port;
+    async _pick(path) {
         if (path === NEW_PORT || !this.ports[Number(path)]) {
-            port = await requestPort();          // must run inside the click handler
+            const port = await requestPort();    // must run inside the click handler
             if (!this.ports.includes(port)) this.ports.push(port);
-        } else {
-            port = this.ports[Number(path)];
+            return port;
         }
-        return this.session.connect(port, profile);
+        return this.ports[Number(path)];
+    }
+
+    async connect(path, profile) {
+        return this.session.connect(await this._pick(path), profile);
+    }
+
+    /** ATRV only (ELM327, no ECU): works with the ignition off. */
+    async watchBattery(path) {
+        return this.session.watchBattery(await this._pick(path));
     }
 
     disconnect() { return this.session.disconnect(); }

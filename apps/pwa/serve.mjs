@@ -14,7 +14,7 @@ const dist = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dist');
 const port = Number(process.argv[2] || process.env.PORT || 5173);
 const MIME = {
     '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-    '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png',
+    '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.wav': 'audio/wav',
 };
 
 http.createServer(async (req, res) => {

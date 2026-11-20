@@ -33,10 +33,13 @@ export class SimTransport {
      * @param {object} [o]
      * @param {boolean} [o.vary=false] - make RPM / throttle move (demo mode)
      * @param {boolean} [o.engineOff=false] - serve the engine-off capture
+     * @param {'hot'|null} [o.scenario=null] - 'hot': coolant climbs 95→115 °C in
+     *   ~60 s and the battery stays at 12.4 V with the engine running (alert demo)
      * @param {number} [o.hangAfter=0] - after N block reads the adapter "hangs":
      *   every non-AT command answers NO DATA until an ATZ (adapter reboot)
      */
-    constructor({ chunkSize = 7, latencyMs = 2, responses = {}, vary = false, engineOff = false, hangAfter = 0 } = {}) {
+    constructor({ chunkSize = 7, latencyMs = 2, responses = {}, vary = false, engineOff = false, hangAfter = 0, scenario = null } = {}) {
+        this.scenario = scenario;
         this.hangAfter = hangAfter;
         this.blockReads = 0;
         this.hung = false;
@@ -99,7 +102,18 @@ export class SimTransport {
         }
         let data = this.responses[c] ?? `7F ${c.slice(0, 2)} 12`;
         if (c === '2101' && this.vary) data = this._varied2101(data);
+        if (c === '2101' && this.scenario === 'hot') data = this._hot2101(data);
         return this.headers ? kwpFrame(data) : data;
+    }
+
+    /** Demo: overheating + not charging (coolant data[3], battery data[0]). */
+    _hot2101(data) {
+        const b = hexToBytes(data);
+        const s = (Date.now() - this._t0) / 1000;
+        const coolant = Math.min(115, 95 + s / 3);
+        b[2 + 3] = Math.round((coolant + 48) / 0.75);
+        b[2 + 0] = 124;                                      // 12.4 V
+        return toHex(b);
     }
 
     /** Demo: a slow "rev" cycle on RPM (data 19-20) and throttle (data 6-7). */

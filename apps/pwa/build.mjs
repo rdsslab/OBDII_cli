@@ -41,7 +41,7 @@ const importMap = {
     },
 };
 let html = await readFile(path.join(UI, 'index.html'), 'utf8');
-const entryRe = /\s*<!-- obdii:entry[^>]*-->\s*<script type="module" src="src\/main-remote\.js"><\/script>/;
+const entryRe = /\s*<!-- obdii:entry:start[^>]*-->[\s\S]*?<!-- obdii:entry:end -->/;
 if (!entryRe.test(html)) throw new Error('Entry marker not found in packages/ui/index.html');
 html = html.replace(entryRe, `
   <script type="importmap">${JSON.stringify(importMap)}</script>

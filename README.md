@@ -45,6 +45,7 @@ Monorepo con *npm workspaces*: un núcleo independiente de la plataforma y una a
   - 📄 [**dtc-database.js**](packages/core/src/dtc-database.js): base de datos de códigos de error y plantilla del reporte HTML en español.
   - 📁 [**test/**](packages/core/test/): pruebas con un ELM327 + ECU simulados a partir de capturas reales del vehículo (`npm test`).
   - 📄 [**diagnostics.js**](packages/core/src/diagnostics.js): lógica de alto nivel (DTCs con su explicación, muestreo en tiempo real, identificación de la ECU) que devuelve JSON; la usan el servidor web y, más adelante, la PWA y la app Android.
+  - 📄 [**alerts.js**](packages/core/src/alerts.js): motor de alertas (umbrales configurables, retardo, margen de salida, repetición de las críticas).
   - 📄 [**session.js**](packages/core/src/session.js): `ObdSession`, la sesión compartida (conexión, tiempo real con recuperación escalonada, borrado). La usan el servidor y la PWA.
   - 📄 [**sim-transport.js**](packages/core/src/sim-transport.js): ELM327 + ECU SIM2K-33 simulados con capturas reales, para pruebas y demostraciones sin el auto.
 - 📁 **packages/serial-node/** (`@obdii/serial-node`): transporte para Node.js con `serialport` (puerto COM / Bluetooth SPP). Lo usan la consola y el servidor web.
@@ -152,6 +153,53 @@ En Windows, el ELM327 emparejado aparece en el selector como su puerto COM (el s
 **Publicación:** el workflow [.github/workflows/pages.yml](.github/workflows/pages.yml) prueba el núcleo, compila y publica `apps/pwa/dist` en GitHub Pages en cada push a `main` que toque la PWA, la interfaz o el núcleo. La compilación no usa dependencias: copia la interfaz y el núcleo y resuelve los módulos con un *import map*.
 
 Diferencias con el servidor: la sesión es de un solo dispositivo, y «Borrar códigos» pide confirmación pero no PIN.
+
+---
+
+## 🚨 Alertas, sonido y calibración (interfaces web)
+
+Funcionan igual en el servidor web y en la PWA. En la pestaña **Ajustes** se configuran el sonido, cada alerta con sus umbrales y la calibración GPS. Cada dispositivo guarda sus propios valores.
+
+### Alertas
+| Alerta | Condición por defecto (editable) |
+|---|---|
+| Sobrecalentamiento | Refrigerante ≥ 105 °C (crítica ≥ 110 °C) durante 5 s; se despeja bajo 100 °C |
+| La batería no carga | Motor en marcha más de 30 s y < 12.8 V durante 20 s (crítica) |
+| Sobrevoltaje | > 15.0 V durante 10 s (crítica) |
+| Batería baja | Motor apagado y < 12.0 V (crítica < 11.6 V) durante 10 s |
+| Contacto en ON sin arrancar | Más de 10 min con el contacto en ON y el motor apagado |
+| Comunicación perdida | Se pierde el enlace con la ECU o el adaptador |
+| Código de error nuevo | Códigos que aparecen durante la sesión (se releen cada 3 min); P1535 se ignora por defecto |
+| Motor frío | < 50 °C y > 3500 RPM (informativa) |
+| Exceso de revoluciones | > 5500 RPM |
+| El motor no se calienta | Más de 15 min en marcha y < 70 °C (informativa) |
+| Calentamiento anormal | El refrigerante sube > 5 °C/min con el motor sobre 70 °C |
+
+- **Aviso en pantalla:** cada alerta muestra un aviso con botón «Entendido»; las informativas desaparecen solas.
+- **Repetición:** las críticas se repiten cada 30 s hasta tocar «Entendido».
+- **Sonido:**
+  - 1 pitido para las informativas, 2 para las advertencias y 3 rápidos para las críticas;
+  - después, la voz grabada en español o inglés (`packages/ui/src/sounds/<idioma>/<alerta>.wav`);
+  - si el audio no se puede reproducir, la voz sintética del navegador; si tampoco está disponible, solo pitidos.
+- **Otros avisos:** vibración en Android y notificación del sistema si la página está en segundo plano (requiere permiso).
+- **Pantalla encendida:** se mantiene encendida durante el tiempo real.
+- **Activar el sonido:** el navegador solo permite sonido después de tocar la página una vez.
+- **Voces:** las genera `node tools/generate-voices.mjs` con las voces de Windows (Helena, es-ES; Zira, en-US). Los textos están en `packages/ui/src/sounds/phrases.js`. Para usar grabaciones propias, reemplaza los WAV conservando los nombres.
+
+### Vigilar batería
+El botón **Vigilar batería (contacto apagado)** de la pestaña Conexión mide solo el voltaje con el ELM327 (`ATRV`) cada 30 s, sin hablar con la ECU, y activa la alerta de batería baja. Sirve, por ejemplo, para vigilar una batería débil o luces olvidadas mientras estás cerca. El ELM327 conectado también consume batería.
+
+### Calibración de velocidad (GPS)
+En la PWA del teléfono (HTTPS), en Ajustes → **Calibración de velocidad**:
+1. Conéctate al vehículo.
+2. Pulsa **Iniciar calibración**: arranca el tiempo real y pide permiso de ubicación.
+3. Conduce a velocidades variadas y estables.
+
+La pantalla compara la velocidad del GPS con la de la ECU y muestra en vivo:
+- el ajuste `gps = a × byte18 + b`;
+- el **byte del bloque 2101 que mejor sigue al GPS**, por si la velocidad real está en otro byte.
+
+**Descargar CSV** genera un archivo con cada punto: velocidades, precisión, RPM, estado del motor y el bloque 2101 completo en hexadecimal, para analizarlo después. Las coordenadas no se guardan salvo que marques «Incluir coordenadas». Desde el servidor de la red local no funciona, porque los navegadores solo dan acceso al GPS en HTTPS o localhost.
 
 ---
 
