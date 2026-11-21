@@ -41,12 +41,14 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;margin:0 0 12
 <body>
 <header>
   <b>OBD2 · ESP32</b>
+  <a href="/" class="btn primary" style="text-decoration:none">Panel OBD2</a>
   <span id="pill" class="pill" data-s="off">—</span>
   <span id="volt" class="chip" hidden></span>
   <button id="logout" class="btn ghost" title="Salir">Salir</button>
 </header>
 <main>
   <div id="defaults" class="banner span" hidden></div>
+  <div id="bridge" class="banner span" hidden></div>
 
   <section class="card">
     <h2>Adaptador ELM327 (Bluetooth)</h2>
@@ -157,7 +159,10 @@ function render() {
   $('sVolt').textContent = e.voltage != null ? `${e.voltage} V` : '—';
   $('sEcu').textContent = st.ecu || '—';
   $('sErr').hidden = !b.error; $('sErr').textContent = b.error || '';
-  const conn = b.state === 'connected', busy = !!b.busy;
+  const br = st.bridge || {};
+  $('bridge').hidden = !br.active;
+  $('bridge').textContent = br.active ? `El panel OBD2 está usando el adaptador desde ${br.ip || 'otro dispositivo'}. Las pruebas de esta página quedan bloqueadas hasta que se desconecte ahí.` : '';
+  const conn = b.state === 'connected', busy = !!b.busy || !!br.active;
   $('scan').disabled = busy || conn;
   $('disconnect').disabled = busy || !(conn || b.autoReconnect || b.state === 'error');
   for (const id of ['init', 'voltage', 'ecu']) $(id).disabled = busy || !conn;

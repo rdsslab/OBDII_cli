@@ -13,13 +13,20 @@ import {
 const NEW_PORT = 'new';
 
 export class DirectClient {
-    constructor() {
+    /**
+     * @param {object} [o] - other transports (e.g. the ESP32 bridge); default Web Serial
+     * @param {(portRef: any) => object} [o.makeTransport]
+     * @param {(portRef: any) => string} [o.describePort]
+     * @param {object} [o.capabilities]
+     */
+    constructor({ makeTransport, describePort, capabilities } = {}) {
+        const webSerial = !makeTransport;
         this.listeners = {};
-        this.capabilities = { choosePort: true, sharedSession: false, clearNeedsPin: false, webSerial: isWebSerialSupported() };
+        this.capabilities = capabilities || { choosePort: true, sharedSession: false, clearNeedsPin: false, webSerial: isWebSerialSupported() };
         this.ports = [];            // SerialPort objects, index = id
         this._reportUrl = null;
         this.session = new ObdSession({
-            makeTransport: (port) => {
+            makeTransport: makeTransport || ((port) => {
                 const t = new WebSerialTransport(port);
                 t.onClose(() => {
                     const st = this.session.state.status;
@@ -28,12 +35,12 @@ export class DirectClient {
                     }
                 });
                 return t;
-            },
-            describePort: (port) => describeSerialPort(port),
+            }),
+            describePort: describePort || ((port) => describeSerialPort(port)),
         });
         for (const ev of ['live', 'dtcs', 'ecu-info', 'log', 'ecu-link']) this.session.on(ev, (d) => this._emit(ev, d));
         this.session.on('state', () => this._emit('state', this._state()));
-        if (isWebSerialSupported()) {
+        if (webSerial && isWebSerialSupported()) {
             navigator.serial.addEventListener('disconnect', (e) => {
                 const st = this.session.state.status;
                 if (e.target === this.session.portRef && (st === 'connected' || st === 'watch')) {
@@ -69,7 +76,7 @@ export class DirectClient {
     start() {
         this._emit('link', { online: true });
         this._emit('state', this._state());
-        if (!isWebSerialSupported()) {
+        if (this.capabilities.webSerial === false) {
             this._emit('log', { level: 'warn', msg: 'Este navegador no soporta Web Serial. Usa Chrome o Edge (en Android, Chrome reciente).', t: Date.now() });
         }
     }

@@ -6,6 +6,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
+#include <freertos/stream_buffer.h>
 
 #include <vector>
 
@@ -55,6 +56,19 @@ public:
     ElmStatus status();
     std::vector<ScanDevice> devices();
 
+    // ── WebSocket bridge (phase 2) ─────────────────────────────
+    // A browser runs the diagnostic session itself (packages/core) and the
+    // ESP32 only relays bytes between the WebSocket and Bluetooth. While a
+    // browser holds the bridge, the panel's own jobs are refused.
+    void bridgeAttach();                                 // any task
+    void bridgeDetach();                                 // any task
+    bool bridgeActive() const { return bridge_; }
+    // The Bluetooth task flushed old bytes after the last attach: data may flow.
+    bool bridgeSynced() const { return bridge_ && syncedEpoch_ == epoch_; }
+    size_t bridgeWrite(const uint8_t* data, size_t len); // browser -> ELM327 (non-blocking)
+    size_t bridgeRead(uint8_t* data, size_t max);        // ELM327 -> browser (non-blocking)
+    void kickReconnect();                                // try the saved adapter now
+
 private:
     enum JobType : uint8_t { J_SCAN, J_CONNECT, J_DISCONNECT, J_INIT, J_CMD, J_ECU, J_VOLT };
     struct Job {
@@ -77,6 +91,8 @@ private:
     void doEcuTest();
     void doVoltage();
 
+    void maintain();
+    void pumpBridge();
     String sendRaw(const String& cmd, uint32_t timeoutMs);
     void setBt(BtState s, const String& error = "");
     template <typename F> void update(F fn);
@@ -89,6 +105,12 @@ private:
     bool kwpFraming_ = false;     // ATH1 active: decode KWP frames for the log
     uint32_t lastAttemptMs_ = 0;
     uint16_t reconnectFails_ = 0;
+    // bridge
+    volatile bool bridge_ = false;
+    volatile uint32_t epoch_ = 0;          // bumped on every attach
+    volatile uint32_t syncedEpoch_ = 0;    // set by the Bluetooth task after flushing
+    StreamBufferHandle_t toElm_ = nullptr;
+    StreamBufferHandle_t fromElm_ = nullptr;
 };
 
 extern ElmLink elm;

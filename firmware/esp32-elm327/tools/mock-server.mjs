@@ -1,25 +1,23 @@
 /**
- * Firmware simulator: serves web/*.html and the same phase-1 API as the
- * ESP32 (login, Bluetooth, ELM327, settings, Server-Sent Events), with the
- * ELM327 simulated by SimTransport from @obdii/core. Use it to work on the
- * panel without the board:
+ * Firmware simulator: serves the same pages and API as the ESP32 (login,
+ * Bluetooth, ELM327, settings, Server-Sent Events, the WebSocket bridge of
+ * phase 2 and the shared OBD2 panel at /), with the ELM327 simulated by
+ * SimTransport from @obdii/core. Use it to work on the panels without the
+ * board:
  *
  *   node firmware/esp32-elm327/tools/mock-server.mjs [port]     (default 8032)
  *   npm run esp32:mock
  *
- * Login: admin / obd2admin (firmware defaults). The command allowlist is a
- * copy of lib/obd_text/src/obd_text.cpp checkCommand(); keep them in sync.
+ * Login: admin / obd2admin (firmware defaults). POST /api/sim/drop (simulator
+ * only) drops the "Bluetooth" link to try the reconnection.
+ * The command allowlist is a copy of lib/obd_text/src/obd_text.cpp checkCommand(); keep them in sync.
  */
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { SimTransport } from '../../../packages/core/src/sim-transport.js';
 import { ELM327 } from '../../../packages/core/src/elm327.js';
+import { buildAssets } from './build-web.mjs';
 
-const DIR = path.dirname(fileURLToPath(import.meta.url));
-const WEB = path.resolve(DIR, '../web');
 const PORT = Number(process.argv[2] || process.env.PORT || 8032);
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const t0 = Date.now();
@@ -57,9 +55,10 @@ function log(level, msg) {
     emit('log', l, l.id);
 }
 const stateJson = () => ({
-    fw: '0.1.0 (fase 1, simulador)', uptimeS: Math.round((Date.now() - t0) / 1000), heap: 112000, minHeap: 98000,
+    fw: '0.2.0 (fase 2, simulador)', uptimeS: Math.round((Date.now() - t0) / 1000), heap: 112000, minHeap: 98000,
     wifiClients: 1, sessions: sessions.size, apSsid: cfg.apSsid,
     defaults: { web: cfg.webPass === 'obd2admin', ap: cfg.apPass === 'obd2esp32' }, ...structuredClone(st),
+    bridge: { active: !!owner, ready: !!owner?.ready, ip: owner?.ip || '' },
 });
 const pushState = () => emit('state', stateJson());
 setInterval(pushState, 3000);
@@ -111,6 +110,7 @@ function sendRaw(cmd, timeout = 6000) {
 }
 
 async function job(name, fn) {
+    if (owner && name !== 'reconectar') throw Object.assign(new Error('El panel OBD2 está usando el adaptador. Desconéctalo en ese panel (pestaña Conexión) primero.'), { status: 409 });
     if (st.bt.busy) throw Object.assign(new Error(`El adaptador está ocupado: espera a que termine «${st.bt.job}»`), { status: 409 });
     st.bt.busy = true; st.bt.job = name; pushState();
     (async () => { try { await fn(); } finally { st.bt.busy = false; st.bt.job = ''; pushState(); } })();
@@ -149,6 +149,133 @@ async function doEcuTest() {
     log('w', 'La ECU no respondió. ¿Contacto en ON?');
 }
 
+async function connectSim(mac, name, pin, automatic) {
+    lastAttempt = Date.now();
+    Object.assign(st.bt, { state: 'connecting', mac, name: name || st.bt.name, error: '' }); pushState();
+    log('i', `${automatic ? 'Reconectando' : 'Conectando'} con ${name ? name + ' ' : ''}${mac}...`);
+    await sleep(1500);
+    if (mac !== FAKE_DEVICES[0].mac) {
+        Object.assign(st.bt, { state: 'error', error: 'No se pudo conectar. ¿Adaptador encendido (en el conector OBD) y PIN correcto?' });
+        log('w', `No se pudo conectar con ${mac}`);
+        return;
+    }
+    sim = new SimTransport({ latencyMs: 30, vary: true });
+    await sim.open();
+    Object.assign(st.bt, { state: 'connected', autoReconnect: true });
+    Object.assign(cfg, { elmMac: mac, elmName: name || cfg.elmName, elmPin: pin || cfg.elmPin });
+    log('i', `Conectado por Bluetooth a ${mac}`);
+    await doInit();
+}
+
+// Auto-reconnect to the saved adapter, as the firmware does (every 15 s)
+let lastAttempt = 0;
+setInterval(() => {
+    if (st.bt.autoReconnect && st.bt.state !== 'connected' && !st.bt.busy && cfg.elmMac && Date.now() - lastAttempt > 15000) {
+        job('reconectar', () => connectSim(cfg.elmMac, cfg.elmName, cfg.elmPin, true)).catch(() => {});
+    }
+}, 500);
+
+// ── WebSocket bridge (same protocol as web.cpp) ───────────────
+// Minimal RFC 6455 server: enough for the browser's small binary/text frames.
+class MiniWs {
+    constructor(socket) {
+        this.socket = socket;
+        this.buf = Buffer.alloc(0);
+        this.closed = false;
+        this.onmessage = null;
+        this.onclose = null;
+        socket.on('data', (d) => this._data(d));
+        socket.on('close', () => this._gone());
+        socket.on('error', () => this._gone());
+    }
+    _gone() { if (!this.closed) { this.closed = true; this.onclose?.(); } }
+    _frame(op, payload) {
+        if (this.closed) return;
+        const n = payload.length;
+        const head = n < 126 ? Buffer.from([0x80 | op, n])
+            : n < 65536 ? Buffer.from([0x80 | op, 126, n >> 8, n & 255])
+            : (() => { const h = Buffer.alloc(10); h[0] = 0x80 | op; h[1] = 127; h.writeBigUInt64BE(BigInt(n), 2); return h; })();
+        this.socket.write(Buffer.concat([head, payload]));
+    }
+    send(data) { typeof data === 'string' ? this._frame(1, Buffer.from(data)) : this._frame(2, Buffer.from(data)); }
+    close(code = 1000, reason = '') {
+        if (this.closed) return;
+        const p = Buffer.alloc(2 + Buffer.byteLength(reason));
+        p.writeUInt16BE(code, 0);
+        p.write(reason, 2);
+        this._frame(8, p);
+        this.socket.end();
+        this._gone();
+    }
+    _data(d) {
+        this.buf = Buffer.concat([this.buf, d]);
+        for (;;) {
+            if (this.buf.length < 2) return;
+            const op = this.buf[0] & 15;
+            let len = this.buf[1] & 127, off = 2;
+            if (len === 126) { if (this.buf.length < 4) return; len = this.buf.readUInt16BE(2); off = 4; }
+            else if (len === 127) { if (this.buf.length < 10) return; len = Number(this.buf.readBigUInt64BE(2)); off = 10; }
+            const masked = this.buf[1] & 128;
+            const total = off + (masked ? 4 : 0) + len;
+            if (this.buf.length < total) return;
+            const payload = Buffer.from(this.buf.subarray(total - len, total));
+            if (masked) { const m = this.buf.subarray(off, off + 4); for (let i = 0; i < len; i++) payload[i] ^= m[i & 3]; }
+            this.buf = this.buf.subarray(total);
+            if (op === 8) { this.close(payload.length >= 2 ? payload.readUInt16BE(0) : 1000); return; }
+            if (op === 9) this._frame(10, payload);
+            else if (op === 1 || op === 2) this.onmessage?.(op, payload);
+        }
+    }
+}
+
+let owner = null;   // { ws, ready, ip, feed, timer }
+function bridgeOpen(ws, ip) {
+    if (!cfg.elmMac) return ws.close(4002, 'El ESP32 no tiene un adaptador ELM327 guardado');
+    if (!owner && st.bt.busy && st.bt.job !== 'reconectar') return ws.close(4003, 'El ESP32 está ocupado con una prueba de su panel');
+    if (owner) {
+        log('i', `El panel OBD2 pasa de ${owner.ip} a ${ip}`);
+        bridgeEnd(owner);
+        owner.ws.close(4001, 'Otro dispositivo tomó el control del adaptador');
+    } else {
+        log('i', `Panel OBD2 conectado desde ${ip}`);
+    }
+    const o = { ws, ip, ready: false, waitAt: 0 };
+    owner = o;
+    o.feed = (chunk) => ws.send(Buffer.from(chunk));
+    if (st.bt.state !== 'connected') { st.bt.autoReconnect = true; lastAttempt = 0; }
+    st.ecu = 'en el panel OBD2';
+    o.timer = setInterval(() => {
+        const up = st.bt.state === 'connected' && !st.bt.busy && sim;
+        if (!o.ready) {
+            if (up) {
+                o.ready = true;
+                sim.onData(o.feed);
+                ws.send(JSON.stringify({ type: 'ready', name: st.bt.name, mac: st.bt.mac }));
+                log('i', 'Puente listo: el panel OBD2 maneja el ELM327');
+                pushState();
+            } else if (Date.now() - o.waitAt > 4000) {
+                o.waitAt = Date.now();
+                ws.send(JSON.stringify({ type: 'wait', reason: st.bt.state === 'connecting' ? `conectando por Bluetooth con ${st.bt.name || st.bt.mac}` : st.bt.error || 'esperando el Bluetooth del adaptador' }));
+            }
+        } else if (!up && !st.bt.busy) {
+            const why = 'Se perdió la conexión Bluetooth entre el ESP32 y el adaptador';
+            ws.send(JSON.stringify({ type: 'lost', reason: why }));
+            ws.close(1000, why);
+        }
+    }, 50);
+    ws.onmessage = (op, payload) => { if (owner === o && o.ready && op === 2) sim?.write(payload.toString('latin1')); };
+    ws.onclose = () => {
+        bridgeEnd(o);
+        if (owner === o) { owner = null; log('i', `Panel OBD2 desconectado (${o.ip})`); }
+    };
+    pushState();
+}
+function bridgeEnd(o) {
+    clearInterval(o.timer);
+    sim?.offData(o.feed);
+    o.ready = false;
+}
+
 // ── HTTP ──────────────────────────────────────────────────────
 const cookieOf = (req) => (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith('obd_sess='))?.slice(9) || '';
 const authed = (req) => sessions.has(cookieOf(req));
@@ -180,22 +307,18 @@ const routes = {
         const mac = String(b.mac || '').toUpperCase();
         if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)) throw Object.assign(new Error('MAC inválida (formato AA:BB:CC:DD:EE:FF)'), { status: 409 });
         if (st.bt.state === 'connected') throw Object.assign(new Error('Ya hay un adaptador conectado'), { status: 409 });
-        return job('conectar', async () => {
-            Object.assign(st.bt, { state: 'connecting', mac, name: b.name || st.bt.name, error: '' }); pushState();
-            log('i', `Conectando con ${b.name ? b.name + ' ' : ''}${mac}...`);
-            await sleep(1500);
-            if (mac !== FAKE_DEVICES[0].mac) {
-                Object.assign(st.bt, { state: 'error', error: 'No se pudo conectar. ¿Adaptador encendido (en el conector OBD) y PIN correcto?' });
-                log('w', `No se pudo conectar con ${mac}`);
-                return;
-            }
-            sim = new SimTransport({ latencyMs: 30, vary: true });
-            await sim.open();
-            Object.assign(st.bt, { state: 'connected', autoReconnect: true });
-            Object.assign(cfg, { elmMac: mac, elmName: b.name || cfg.elmName, elmPin: b.pin || cfg.elmPin });
-            log('i', `Conectado por Bluetooth a ${mac}`);
-            await doInit();
-        });
+        return job('conectar', () => connectSim(mac, b.name, b.pin, false));
+    },
+    // Simulator only: the "Bluetooth" link drops (the ESP32 retries every 15 s)
+    'POST /api/sim/drop': () => {
+        if (st.bt.state !== 'connected') throw Object.assign(new Error('No hay adaptador conectado'), { status: 409 });
+        sim?.close(); sim = null;
+        Object.assign(st.bt, { state: 'error', error: 'Conexión Bluetooth perdida' });
+        st.elm.ready = false;
+        lastAttempt = Date.now() - 10000;     // retry in ~5 s
+        log('w', 'Se perdió la conexión Bluetooth con el adaptador (simulado)');
+        pushState();
+        return { ok: true };
     },
     'POST /api/bt/disconnect': () => job('desconectar', async () => {
         await sim?.close(); sim = null;
@@ -243,13 +366,24 @@ const routes = {
 };
 function needConn() { if (st.bt.state !== 'connected') throw Object.assign(new Error('Conecta el adaptador primero'), { status: 409 }); }
 
-http.createServer(async (req, res) => {
+const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
     try {
-        if (req.method === 'GET' && (url.pathname === '/login' || url.pathname === '/')) {
-            if (url.pathname === '/' && !authed(req)) { res.writeHead(302, { Location: '/login' }); return res.end(); }
+        // Pages: / OBD2 panel (packages/ui), /esp32 adapter page, /login.
+        // Read from the repo on every request, so edits show on reload.
+        const PAGES = { '/': 'APP', '/esp32': 'ESP32', '/login': 'LOGIN' };
+        if (req.method === 'GET' && PAGES[url.pathname]) {
+            if (url.pathname !== '/login' && !authed(req)) { res.writeHead(302, { Location: '/login' }); return res.end(); }
+            const { pages } = await buildAssets();
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-            return res.end(await readFile(path.join(WEB, url.pathname === '/' ? 'index.html' : 'login.html')));
+            return res.end(pages[PAGES[url.pathname]]);
+        }
+        if (req.method === 'GET' && /^\/(src|vendor)\//.test(url.pathname)) {
+            const a = (await buildAssets()).assets.find(x => x.path === url.pathname);
+            if (a) {
+                res.writeHead(200, { 'Content-Type': a.type, 'Cache-Control': 'no-cache' });
+                return res.end(a.data);
+            }
         }
         if (req.method === 'POST' && url.pathname === '/api/login') {
             if (Date.now() < guard.lockedUntil) return fail(res, 429, `Demasiados intentos. Espera ${Math.ceil((guard.lockedUntil - Date.now()) / 1000)} s.`);
@@ -288,7 +422,20 @@ http.createServer(async (req, res) => {
     } catch (err) {
         fail(res, err.status || 500, err.message);
     }
-}).listen(PORT, () => {
+});
+server.on('upgrade', (req, socket) => {
+    const url = new URL(req.url, 'http://x');
+    const key = req.headers['sec-websocket-key'];
+    if (url.pathname !== '/api/ws/elm' || !authed(req) || !key) {
+        socket.end('HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n');
+        return;
+    }
+    const accept = crypto.createHash('sha1').update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+    socket.setNoDelay(true);
+    bridgeOpen(new MiniWs(socket), (socket.remoteAddress || '').replace(/^::ffff:/, ''));
+});
+server.listen(PORT, () => {
     console.log(`\n  Simulador del firmware ESP32: http://localhost:${PORT}  (admin / obd2admin)\n`);
     log('i', 'Bluetooth listo (modo maestro)');
 });

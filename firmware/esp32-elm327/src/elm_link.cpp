@@ -64,6 +64,8 @@ void ElmLink::begin(Settings* settings) {
     settings_ = settings;
     mtx_ = xSemaphoreCreateMutex();
     jobs_ = xQueueCreate(4, sizeof(Job));
+    toElm_ = xStreamBufferCreate(BRIDGE_BUF_BYTES, 1);
+    fromElm_ = xStreamBufferCreate(BRIDGE_BUF_BYTES, 1);
     st_.mac = settings->elmMac;
     st_.name = settings->elmName;
     st_.autoReconnect = settings->elmMac.length() == 17;
@@ -86,6 +88,7 @@ std::vector<ScanDevice> ElmLink::devices() {
 }
 
 bool ElmLink::enqueue(JobType t, const String& a, const String& b, const String& c, String& why) {
+    if (bridge_) { why = "El panel OBD2 está usando el adaptador. Desconéctalo en ese panel (pestaña Conexión) primero."; return false; }
     const ElmStatus s = status();
     if (s.busy || uxQueueMessagesWaiting(jobs_) > 0) { why = "El adaptador está ocupado: espera a que termine «" + s.job + "»"; return false; }
     Job j{};
@@ -154,12 +157,23 @@ void ElmLink::taskLoop() {
     bus.info("Bluetooth listo (modo maestro)");
 
     for (;;) {
+        if (bridge_) {
+            pumpBridge();                 // waits up to a few ms for browser bytes
+            maintain();
+            continue;
+        }
         Job j;
         if (xQueueReceive(jobs_, &j, pdMS_TO_TICKS(500)) == pdTRUE) {
             run(j);
             continue;
         }
-        // Idle maintenance: detect a dropped link, auto-reconnect to the saved adapter
+        maintain();
+    }
+}
+
+// Detect a dropped link; auto-reconnect to the saved adapter.
+void ElmLink::maintain() {
+    {
         const ElmStatus s = status();
         if (s.bt == BtState::Connected && !SerialBT.connected()) {
             bus.warn("Se perdió la conexión Bluetooth con el adaptador");
@@ -172,6 +186,50 @@ void ElmLink::taskLoop() {
             doConnect(settings_->elmMac, settings_->elmPin, settings_->elmName, true);
             update([](ElmStatus& st) { st.busy = false; st.job = ""; });
         }
+    }
+}
+
+// ── Bridge ─────────────────────────────────────────────────────
+void ElmLink::bridgeAttach() {
+    epoch_ = epoch_ + 1;          // the Bluetooth task flushes, then bridgeSynced()
+    bridge_ = true;
+}
+
+void ElmLink::bridgeDetach() { bridge_ = false; }
+
+size_t ElmLink::bridgeWrite(const uint8_t* data, size_t len) {
+    if (!bridgeSynced()) return 0;
+    return xStreamBufferSend(toElm_, data, len, 0);
+}
+
+size_t ElmLink::bridgeRead(uint8_t* data, size_t max) {
+    return xStreamBufferReceive(fromElm_, data, max, 0);
+}
+
+void ElmLink::kickReconnect() {
+    if (settings_->elmMac.length() != 17) return;
+    update([](ElmStatus& st) { st.autoReconnect = true; });
+    lastAttemptMs_ = millis() - BT_CONNECT_RETRY_MS - 1;
+}
+
+void ElmLink::pumpBridge() {
+    if (syncedEpoch_ != epoch_) {
+        // New browser: drop whatever the previous one (or the ELM327) left behind.
+        const uint32_t e = epoch_;
+        xStreamBufferReset(toElm_);
+        xStreamBufferReset(fromElm_);
+        while (SerialBT.available()) SerialBT.read();
+        kwpFraming_ = false;
+        update([](ElmStatus& st) { st.elmReady = false; st.ecu = "en el panel OBD2"; });
+        syncedEpoch_ = e;
+    }
+    uint8_t buf[256];
+    const size_t n = xStreamBufferReceive(toElm_, buf, sizeof buf, pdMS_TO_TICKS(3));
+    if (n && SerialBT.connected()) SerialBT.write(buf, n);
+    size_t got = 0;
+    while (got < sizeof buf && SerialBT.available()) buf[got++] = static_cast<uint8_t>(SerialBT.read());
+    if (got && xStreamBufferSend(fromElm_, buf, got, 0) != got) {
+        bus.warn("Puente: el navegador no lee a tiempo, se perdieron datos");
     }
 }
 

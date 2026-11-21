@@ -4,7 +4,7 @@
 #pragma once
 
 #define FW_NAME "obd-esp32-elm327"
-#define FW_VERSION "0.1.0 (fase 1)"
+#define FW_VERSION "0.2.0 (fase 2)"
 
 // Wi-Fi access point (default)
 #define DEFAULT_AP_SSID "OBD2-ESP32"
@@ -32,6 +32,10 @@
 #define ELM_TIMEOUT_MS 6000
 #define ELM_INIT_TIMEOUT_MS 12000
 #define KLINE_IDLE_RECOVERY_MS 6000
+
+// WebSocket bridge browser <-> ELM327 (phase 2)
+#define BRIDGE_BUF_BYTES 2048              // each direction
+#define BRIDGE_WAIT_NOTE_MS 4000           // "still waiting for Bluetooth" note to the browser
 
 // Event log kept for the page (newest last)
 #define LOG_LINES 120

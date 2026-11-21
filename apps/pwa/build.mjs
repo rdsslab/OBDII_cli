@@ -25,7 +25,10 @@ await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 
 // 1. Shared UI, core and the Web Serial transport
-await cp(path.join(UI, 'src'), path.join(dist, 'src'), { recursive: true });
+await cp(path.join(UI, 'src'), path.join(dist, 'src'), {
+    recursive: true,
+    filter: (src) => !/(main-esp32|esp32-client|esp32-transport)\.js$/.test(src),   // ESP32 firmware only
+});
 await cp(path.join(root, 'packages/core/src'), path.join(dist, 'vendor/core'), {
     recursive: true,
     filter: (src) => !src.endsWith('sim-transport.js'),     // test/demo only

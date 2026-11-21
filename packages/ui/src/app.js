@@ -326,8 +326,11 @@ export function startApp(client) {
     // Platform differences come from the client's capabilities
     $('sessionHint').textContent = caps.sharedSession
         ? 'Pon el contacto en ON antes de conectar. La conexión es compartida: todos los dispositivos ven la misma sesión.'
-        : 'Pon el contacto en ON antes de conectar. Este dispositivo se conecta directo al ELM327.';
+        : caps.esp32
+            ? 'Pon el contacto en ON antes de conectar. El ESP32 mantiene el Bluetooth con el ELM327; un solo dispositivo a la vez maneja el adaptador (si otro se conecta, toma el control).'
+            : 'Pon el contacto en ON antes de conectar. Este dispositivo se conecta directo al ELM327.';
     $('unsupported').hidden = caps.webSerial !== false;
+    $('esp32Hint').hidden = !caps.esp32;
 
     const alerts = startAlerts(client, { toast, onLog: addLog });
     startCalibration(client, { toast, onLog: addLog, getState: () => state, alerts });
