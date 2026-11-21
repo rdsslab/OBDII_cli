@@ -56,7 +56,8 @@ Monorepo con *npm workspaces*: un núcleo independiente de la plataforma y una a
 - 📁 **apps/pwa/** (`@obdii/pwa`): app web instalable (PWA) que se conecta directo al ELM327 con Web Serial; se publica en GitHub Pages.
 - 📁 **apps/cli/** (`@obdii/cli`): la aplicación de consola.
   - 📄 [**src/index.js**](apps/cli/src/index.js): menús interactivos, monitor en tiempo real, CSV y presentación con colores ANSI.
-- 📁 [**firmware/esp32-elm327/**](firmware/esp32-elm327/README.md): firmware PlatformIO para un ESP32 que crea su propia red Wi-Fi, se conecta al ELM327 por Bluetooth y sirve el panel con usuario y clave (fase 1: comunicación). Simulador sin placa: `npm run esp32:mock`.
+- 📁 [**firmware/esp32-elm327/**](firmware/esp32-elm327/README.md): firmware PlatformIO para un ESP32 que crea su propia red Wi-Fi, se conecta al ELM327 por Bluetooth y sirve el mismo panel OBD2 (`packages/ui`) con usuario y clave (fase 2). Simulador sin placa: `npm run esp32:mock`.
+- 📄 [**docs/ESTADO_Y_PASOS.md**](docs/ESTADO_Y_PASOS.md): estado actual, instalación en Linux y pasos pendientes hasta terminar el proyecto.
 
 ---
 
@@ -65,7 +66,7 @@ Monorepo con *npm workspaces*: un núcleo independiente de la plataforma y una a
 ### Requisitos Previos
 1. **Node.js** v18 o superior instalado en el equipo.
 2. Un adaptador **ELM327 Bluetooth** conectado al puerto OBD2 del vehículo.
-3. El adaptador debe estar emparejado con tu sistema operativo antes de iniciar la aplicación. Esto creará un puerto COM virtual de entrada/salida (comúnmente visible en el Administrador de Dispositivos de Windows).
+3. El adaptador debe estar emparejado con tu sistema operativo antes de iniciar la aplicación. En Windows esto crea un puerto COM virtual (visible en el Administrador de Dispositivos); en Linux se crea `/dev/rfcomm0` con `rfcomm bind` (ver [docs/ESTADO_Y_PASOS.md](docs/ESTADO_Y_PASOS.md#6-usar-la-consola-y-el-servidor-en-linux-opcional)).
 
 ### Instalación
 
