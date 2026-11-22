@@ -7,21 +7,17 @@
  *
  *   PAGE_LOGIN_GZ   web/login.html                  /login
  *   PAGE_ESP32_GZ   web/index.html                  /esp32  (adapter, Wi-Fi, keys, terminal)
- *   PAGE_APP_GZ     packages/ui/index.html          /       (the shared OBD2 panel)
- *   APP_ASSETS[]    packages/ui/src/**              /src/...
- *                   packages/core/src/*.js          /vendor/core/...
- *                   packages/web-serial/src/*.js    /vendor/web-serial/...
+ *   PAGE_APP_GZ     packages/ui/index.html          /       (shared OBD2 panel, JS/CSS/SVG inlined)
  *
- * The panel and the core are the same files as the PWA and the server use,
- * so every change there reaches the ESP32 on the next build. The recorded
- * voice files (sounds/<lang>/*.wav, ~2.5 MB) are left out: the browser's
- * speech synthesis says the same phrases (see packages/ui/src/sound.js).
+ * All CSS/JS/SVG for the panel are inlined into a single HTML to minimize HTTP
+ * requests on ESP32 lwIP. The panel/core come from packages/ui and packages/core.
  *
  * Exports buildAssets() for the mock server and the tests.
  */
-import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -30,51 +26,44 @@ const FW = path.resolve(HERE, '..');
 const ROOT = path.resolve(FW, '../..');
 const OUT = path.join(FW, 'include', 'web_assets.h');
 
-export const MIME = {
-    '.html': 'text/html; charset=utf-8',
-    '.js': 'text/javascript; charset=utf-8',
-    '.css': 'text/css; charset=utf-8',
-    '.svg': 'image/svg+xml',
-    '.json': 'application/json',
-};
-
-const IMPORT_MAP = {
-    imports: {
-        '@obdii/core': './vendor/core/index.js',
-        '@obdii/web-serial': './vendor/web-serial/index.js',
-    },
-};
-
-// Left out of the ESP32 build: other entry points, test helpers, recorded voices.
-const SKIP = [
-    /^src\/main-(direct|remote)\.js$/,
-    /^src\/clients\/remote-client\.js$/,
-    /^src\/sounds\/[^/]+\/.+\.wav$/,
-    /^vendor\/core\/sim-transport\.js$/,
-];
-
-async function walk(dir, base = dir) {
-    const out = [];
-    for (const e of await readdir(dir, { withFileTypes: true })) {
-        const p = path.join(dir, e.name);
-        if (e.isDirectory()) out.push(...await walk(p, base));
-        else out.push(path.relative(base, p).split(path.sep).join('/'));
-    }
-    return out.sort();
+function inlineAssets(html, { css, svg, js }) {
+    const iconData = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+    html = html.replace(/href="src\/icon\.svg"/, `href="${iconData}"`);
+    html = html.replace(/<link\s+rel="stylesheet"\s+href="src\/styles\.css"\s*\/?>/, () => `<style>\n${css}\n</style>`);
+    const entryRe = /\s*<!-- obdii:entry:start[^>]*-->[\s\S]*?<!-- obdii:entry:end -->/;
+    if (!entryRe.test(html)) throw new Error('Entry marker not found in packages/ui/index.html');
+    // Prevent </script> inside bundle from breaking HTML parser.
+    const safeJs = js.replace(/<\/script>/gi, '<\\/script>');
+    return html.replace(entryRe, `\n  <script type="module">\n${safeJs}\n  </script>`);
 }
 
 /** packages/ui/index.html with the ESP32 entry point instead of the server's. */
 export async function appIndexHtml() {
     const html = await readFile(path.join(ROOT, 'packages/ui/index.html'), 'utf8');
-    const entryRe = /\s*<!-- obdii:entry:start[^>]*-->[\s\S]*?<!-- obdii:entry:end -->/;
-    if (!entryRe.test(html)) throw new Error('Entry marker not found in packages/ui/index.html');
-    return html.replace(entryRe, `
-  <script type="importmap">${JSON.stringify(IMPORT_MAP)}</script>
-  <script type="module" src="src/main-esp32.js"></script>`);
+    const css = await readFile(path.join(ROOT, 'packages/ui/src/styles.css'), 'utf8');
+    const svg = await readFile(path.join(ROOT, 'packages/ui/src/icon.svg'), 'utf8');
+    const js = bundleEsp32Js().toString('utf8');
+    return inlineAssets(html, { css, svg, js });
+}
+
+function bundleEsp32Js() {
+    const entry = path.join(ROOT, 'packages/ui/src/main-esp32.js');
+    const core = path.join(ROOT, 'packages/core/src/index.js');
+    const webSerial = path.join(ROOT, 'packages/web-serial/src/index.js');
+    // Bundle all JS into one ESM file to reduce HTTP requests (critical on ESP32 lwIP).
+    const out = execFileSync('npx', [
+        '--yes', 'esbuild', entry,
+        '--bundle', '--format=esm', '--platform=browser', '--target=es2020',
+        '--minify', '--log-level=error',
+        `--alias:@obdii/core=${core}`,
+        `--alias:@obdii/web-serial=${webSerial}`,
+    ], { cwd: ROOT, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+    return Buffer.from(out, 'utf8');
 }
 
 /**
  * Every file the ESP32 serves, uncompressed.
+ * 3 files total: login, esp32, and app (all CSS/JS/SVG inlined) - minimizes HTTP requests on ESP32.
  * @returns {Promise<{pages: Record<string, Buffer>, assets: {path: string, type: string, data: Buffer}[]}>}
  */
 export async function buildAssets() {
@@ -83,21 +72,7 @@ export async function buildAssets() {
         ESP32: await readFile(path.join(FW, 'web/index.html')),
         APP: Buffer.from(await appIndexHtml()),
     };
-    const sources = [
-        ['src', path.join(ROOT, 'packages/ui/src')],
-        ['vendor/core', path.join(ROOT, 'packages/core/src')],
-        ['vendor/web-serial', path.join(ROOT, 'packages/web-serial/src')],
-    ];
-    const assets = [];
-    for (const [prefix, dir] of sources) {
-        for (const rel of await walk(dir)) {
-            const url = `${prefix}/${rel}`;
-            const type = MIME[path.extname(rel)];
-            if (!type || SKIP.some(re => re.test(url))) continue;
-            assets.push({ path: `/${url}`, type, data: await readFile(path.join(dir, rel)) });
-        }
-    }
-    return { pages, assets };
+    return { pages, assets: [] };
 }
 
 const gz = (buf) => gzipSync(buf, { level: 9 });
@@ -145,7 +120,11 @@ export async function writeHeader() {
         table.push(`    {${cString(a.path)}, ${cString(a.type)}, ASSET_${i}, ${z.length}},`);
     });
     const id = hash.digest('hex').slice(0, 16);
-    parts.push('', `static const WebAsset APP_ASSETS[] = {`, ...table, '};');
+    if (assets.length === 0) {
+        parts.push('', 'static const WebAsset APP_ASSETS[] = {{nullptr, nullptr, nullptr, 0}};');
+    } else {
+        parts.push('', `static const WebAsset APP_ASSETS[] = {`, ...table, '};');
+    }
     parts.push(`static const size_t APP_ASSETS_COUNT = ${assets.length};`);
     parts.push(`// ETag of every page and asset: changes whenever any of them changes`);
     parts.push(`#define WEB_BUILD_ID "${id}"`, '');

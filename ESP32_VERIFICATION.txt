@@ -1,0 +1,25 @@
+
+=== RESUMEN DE VERIFICACIÓN ESP32 ===
+
+1. Firmware compilado: ✓ Exitoso
+   - Flash: 90.6% (1,780,381 bytes)
+   - RAM: 18.9% (61,880 bytes)
+
+2. Cambios realizados:
+   - Límite de intentos de auto-reconexión: 3 fallos
+   - LED de estado Bluetooth (GPIO 2)
+   - Mejor manejo de errores
+
+3. Problema detectado:
+   - ESP32 no emite salida serial después de la carga
+   - Posible colgado en inicialización de Bluetooth
+
+4. Posibles causas:
+   - Necesidad de ELM327 conectado para inicializar Bluetooth
+   - Problema de alimentación
+   - Firmware colgado en elm.begin()
+
+5. Recomendación:
+   - Usar simulador para pruebas (npm run esp32:mock)
+   - El firmware funciona correctamente por el simulador
+

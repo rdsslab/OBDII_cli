@@ -29,6 +29,8 @@
       <svg viewBox="0 0 24 24"><path d="M7 7l10 10-5 5V2l5 5L7 17" /></svg><span>Conexión</span></button>
     <button role="tab" data-tab="live">
       <svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg><span>Tiempo real</span></button>
+    <button role="tab" data-tab="charts">
+      <svg viewBox="0 0 24 24"><path d="M3 3v18h18M7 15l4-5 3 3 5-7" /></svg><span>Gráficas</span></button>
     <button role="tab" data-tab="dtc">
       <svg viewBox="0 0 24 24"><path d="M12 3l10 18H2z" /><path d="M12 10v4M12 17.5v.5" /></svg><span>Códigos</span></button>
     <button role="tab" data-tab="ecu">
@@ -93,6 +95,25 @@
       <div id="liveGrid" class="grid"></div>
       <p id="liveEmpty" class="empty">Conéctate e inicia el tiempo real para ver los sensores.</p>
       <details class="raw"><summary>Bytes crudos</summary><code id="liveRaw"></code></details>
+    </section>
+
+    <!-- Gráficas: mismo orden de sensores, plano cartesiano en tiempo real -->
+    <section id="tab-charts" class="panel" role="tabpanel" hidden>
+      <div class="toolbar">
+        <label class="field" style="margin:0">Ventana
+          <select id="chartWindow" style="width:auto">
+            <option value="30">30 s</option>
+            <option value="60" selected>60 s</option>
+            <option value="120">120 s</option>
+          </select>
+        </label>
+        <span id="chartInfo" class="muted">60 s de histórico · 0 sensores</span>
+        <span class="spacer"></span>
+        <button id="chartClear" class="btn ghost">Limpiar</button>
+      </div>
+      <div id="chartGrid" class="chart-grid"></div>
+      <p id="chartEmpty" class="empty">Conéctate e inicia el tiempo real para ver la evolución de los sensores.</p>
+      <p class="hint">Cada gráfica comparte el orden del panel de tiempo real. El color de la traza indica la zona: azul (frío), verde (normal), ámbar (cerca del máximo) y rojo (peligro).</p>
     </section>
 
     <!-- Códigos -->

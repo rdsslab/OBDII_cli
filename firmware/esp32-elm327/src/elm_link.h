@@ -38,6 +38,10 @@ struct ElmStatus {
     String ecu = "sin probar";   // "sin probar" | "responde" | "sin respuesta"
     uint32_t lastRxMs = 0;
     bool autoReconnect = false;
+    // Phase 3 alerts
+    bool alertsEnabled = true;
+    bool buzzerEnabled = true;
+    String alert;           // last alert message, empty when none
 };
 
 class ElmLink {
@@ -69,6 +73,9 @@ public:
     size_t bridgeRead(uint8_t* data, size_t max);        // ELM327 -> browser (non-blocking)
     void kickReconnect();                                // try the saved adapter now
 
+    // ── Phase 3 alerts ─────────────────────────────────────────
+    void setAlerts(bool enabled, bool buzzer);           // any task (mutex-protected)
+
 private:
     enum JobType : uint8_t { J_SCAN, J_CONNECT, J_DISCONNECT, J_INIT, J_CMD, J_ECU, J_VOLT };
     struct Job {
@@ -95,6 +102,19 @@ private:
     void pumpBridge();
     String sendRaw(const String& cmd, uint32_t timeoutMs);
     void setBt(BtState s, const String& error = "");
+    void setLed(bool on);              // control the status LED
+
+    // ── Non-blocking command (used by alert SM) ────────────────
+    bool cmdBegin(const String& cmd, uint32_t timeoutMs);
+    // 0=pending, 1=complete (out set), -1=timeout/disconnected
+    int cmdPoll(String& out);
+
+    // ── Phase 3: non-blocking alerts ───────────────────────────
+    void alertTick();                  // advance alert state machine (no blocking)
+    void beepStart(uint8_t pattern);   // start non-blocking beep pattern
+    void beepTick();                   // advance beep pattern
+    void alertSet(const String& msg);  // set/clear last alert in status
+
     template <typename F> void update(F fn);
 
     Settings* settings_ = nullptr;
@@ -105,6 +125,35 @@ private:
     bool kwpFraming_ = false;     // ATH1 active: decode KWP frames for the log
     uint32_t lastAttemptMs_ = 0;
     uint16_t reconnectFails_ = 0;
+    uint16_t maxReconnectFails_ = 3;  // stop auto-reconnect after this many failures
+    bool ledEnabled_ = true;        // allow disable via settings
+    bool reconnectGaveUp_ = false;  // logged once when max fails reached
+
+    // Phase 3: alert config (guarded by mtx_ when written from other tasks)
+    bool alertsEnabled_ = true;
+    bool buzzerEnabled_ = true;
+
+    // Non-blocking command state
+    bool cmdActive_ = false;
+    String cmdBuf_;
+    uint32_t cmdStartMs_ = 0;
+    uint32_t cmdTimeoutMs_ = 0;
+    String cmdEcho_;
+
+    // Alert state machine
+    enum class AlertPhase : uint8_t { Idle, Wait2101, WaitAtrv, Cooldown };
+    AlertPhase alertPhase_ = AlertPhase::Idle;
+    uint32_t alertNextMs_ = 0;
+    uint32_t alertCooldownUntilMs_ = 0;
+    uint32_t lastBatteryWatchMs_ = 0;
+    bool alertKwpInitTried_ = false;
+
+    // Non-blocking beep state machine
+    uint8_t beepRemaining_ = 0;
+    bool beepOn_ = false;
+    uint32_t beepNextMs_ = 0;
+    uint32_t beepDurMs_ = 0;
+
     // bridge
     volatile bool bridge_ = false;
     volatile uint32_t epoch_ = 0;          // bumped on every attach

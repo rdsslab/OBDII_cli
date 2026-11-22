@@ -65,6 +65,8 @@ void load(Settings& s) {
     s.elmMac = p.getString("elmMac", "");
     s.elmName = p.getString("elmName", "");
     s.elmPin = p.getString("elmPin", DEFAULT_ELM_PIN);
+    s.alertsEnabled = p.getBool("alertsOn", true);
+    s.buzzerEnabled = p.getBool("buzzerOn", true);
     p.end();
     if (s.webHash.isEmpty()) {          // first boot
         setPassword(s, DEFAULT_WEB_PASS);
@@ -83,6 +85,8 @@ void save(const Settings& s) {
     p.putString("elmMac", s.elmMac);
     p.putString("elmName", s.elmName);
     p.putString("elmPin", s.elmPin);
+    p.putBool("alertsOn", s.alertsEnabled);
+    p.putBool("buzzerOn", s.buzzerEnabled);
     p.end();
 }
 

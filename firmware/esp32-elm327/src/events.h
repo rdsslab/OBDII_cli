@@ -35,12 +35,13 @@ public:
     void scanChanged() { scanDirty_ = true; }
 
     // Called from the web task: every line newer than *cursor, then flags.
+    // Callback runs under lock to avoid heap allocations on fragmented heaps.
     void drain(uint32_t& cursor, const std::function<void(const LogLine&)>& onLine) {
-        std::deque<LogLine> fresh;
         lock();
-        for (const auto& l : history_) if (l.id > cursor) fresh.push_back(l);
+        for (const auto& l : history_) {
+            if (l.id > cursor) { onLine(l); cursor = l.id; }
+        }
         unlock();
-        for (const auto& l : fresh) { onLine(l); cursor = l.id; }
     }
     bool takeState() { bool d = stateDirty_; stateDirty_ = false; return d; }
     bool takeScan() { bool d = scanDirty_; scanDirty_ = false; return d; }

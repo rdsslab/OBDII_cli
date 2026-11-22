@@ -117,6 +117,17 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;margin:0 0 12
   </section>
 
   <section class="card">
+    <h2>Alertas (fase 3)</h2>
+    <p class="hint">Alertas sin panel abierto: el ESP32 lee la ECU periódicamente y avisa con zumbador. Requiere que la ECU haya respondido (prueba ECU).</p>
+    <label class="row"><input type="checkbox" id="alEn"> Activar alertas</label>
+    <label class="row" style="margin-top:6px"><input type="checkbox" id="alBz"> Zumbador activo</label>
+    <div class="row" style="margin-top:12px">
+      <button id="saveAlerts" class="btn primary">Guardar alertas</button>
+      <span id="alLast" class="hint"></span>
+    </div>
+  </section>
+
+  <section class="card">
     <h2>Sistema</h2>
     <dl>
       <dt>Firmware</dt><dd id="fw">—</dd>
@@ -162,6 +173,8 @@ function render() {
   const br = st.bridge || {};
   $('bridge').hidden = !br.active;
   $('bridge').textContent = br.active ? `El panel OBD2 está usando el adaptador desde ${br.ip || 'otro dispositivo'}. Las pruebas de esta página quedan bloqueadas hasta que se desconecte ahí.` : '';
+  const al = st.alerts || {};
+  $('alLast').textContent = al.last ? 'Última: ' + al.last : '';
   const conn = b.state === 'connected', busy = !!b.busy || !!br.active;
   $('scan').disabled = busy || conn;
   $('disconnect').disabled = busy || !(conn || b.autoReconnect || b.state === 'error');
@@ -227,11 +240,21 @@ $('saveCfg').onclick = async () => {
     else toast('Guardado');
   } catch (e) { toast(e.message); }
 };
+$('saveAlerts').onclick = async () => {
+  try {
+    const r = await api('POST', '/api/alerts', { enabled: $('alEn').checked ? '1' : '0', buzzer: $('alBz').checked ? '1' : '0' });
+    st.alerts = { ...(st.alerts || {}), enabled: r.enabled, buzzer: r.buzzer };
+    toast('Alertas guardadas');
+  } catch (e) { toast(e.message); }
+};
 
 // ── start ──
 (async () => {
   try {
     st = await api('GET', '/api/state'); render();
+    const al = st.alerts || {};
+    $('alEn').checked = !!al.enabled;
+    $('alBz').checked = !!al.buzzer;
     const cfg = await api('GET', '/api/settings');
     $('apSsid').value = cfg.apSsid; $('webUser').value = cfg.webUser; $('elmPin').value = cfg.elmPin;
     if (cfg.elmMac) $('mac').value = cfg.elmMac;

@@ -9,6 +9,7 @@
 #include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <WiFi.h>
+#include <esp_bt.h>
 
 #include "config.h"
 #include "elm_link.h"
@@ -26,14 +27,17 @@ static uint32_t bootPressedAt = 0;
 static void startAccessPoint() {
     const IPAddress ip(AP_IP);
     WiFi.mode(WIFI_AP);
+    WiFi.setSleep(false);   // AP+BT coexistence: modem sleep causes client disconnects
+    WiFi.setTxPower(WIFI_POWER_11dBm);  // reduce brownout risk on weak USB power
     WiFi.softAPConfig(ip, ip, IPAddress(255, 255, 255, 0));
     if (!WiFi.softAP(cfg.apSsid.c_str(), cfg.apPass.c_str(), AP_CHANNEL, 0, AP_MAX_CLIENTS)) {
         bus.warn("No se pudo crear la red Wi-Fi; uso los valores por defecto");
         WiFi.softAP(DEFAULT_AP_SSID, DEFAULT_AP_PASS, AP_CHANNEL, 0, AP_MAX_CLIENTS);
     }
-    dns.setErrorReplyCode(DNSReplyCode::NoError);
-    dns.start(53, "*", ip);
-    if (MDNS.begin("obd")) MDNS.addService("http", "tcp", 80);
+    // DNS captive portal disabled temporarily to reduce TCP connection churn on ESP32.
+    // dns.setErrorReplyCode(DNSReplyCode::NoError);
+    // dns.start(53, "*", ip);
+    // if (MDNS.begin("obd")) MDNS.addService("http", "tcp", 80);
     bus.info("Red Wi-Fi «" + cfg.apSsid + "» en " + ip.toString());
 }
 
@@ -55,6 +59,9 @@ void setup() {
     Serial.begin(115200);
     delay(200);
     Serial.printf("\n%s %s\n", FW_NAME, FW_VERSION);
+    // Release BLE memory - we only use Bluetooth Classic (SPP) for ELM327.
+    // Saves ~30KB heap, critical with Wi-Fi AP + AsyncWebServer.
+    esp_bt_controller_mem_release(ESP_BT_MODE_BLE);
     pinMode(BOOT_PIN, INPUT_PULLUP);
     bus.begin();
     settings::load(cfg);
@@ -65,7 +72,7 @@ void setup() {
 }
 
 void loop() {
-    dns.processNextRequest();
+    // dns.processNextRequest();
     web::loop();
     checkFactoryReset();
     delay(5);

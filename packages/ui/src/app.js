@@ -7,6 +7,8 @@ import { meta } from './labels.js';
 import { startAlerts } from './alerts-ui.js';
 import { startCalibration } from './calibration-ui.js';
 import { startTrips } from './trip-ui.js';
+import { startCharts } from './charts-ui.js';
+import { sortFields, sensorZone } from './sensor-meta.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -195,7 +197,7 @@ export function startApp(client) {
     function onLive(sample) {
         lastLiveAt = Date.now();
         $('liveEmpty').hidden = true;
-        for (const f of sample.fields) {
+        for (const f of sortFields(sample.fields)) {
             const el = tileFor(f);
             const m = meta(f.name);
             const num = typeof f.value === 'number';
@@ -210,7 +212,9 @@ export function startApp(client) {
                 el.querySelector('.mm').textContent = `mín ${fmt(s.min)} · máx ${fmt(s.max)}`;
                 const bar = el.querySelector('.bar i');
                 if (bar) bar.style.width = `${Math.max(0, Math.min(100, (f.value - m.min) / (m.max - m.min) * 100))}%`;
-                el.classList.toggle('warn', m.warnAbove != null && f.value > m.warnAbove);
+                const zone = sensorZone(f.name, f.value, alerts.engine.config);
+                el.dataset.zone = zone;
+                el.classList.toggle('warn', zone === 'warn' || zone === 'bad');
             }
         }
         $('liveRaw').textContent = sample.raw || '';
@@ -333,6 +337,7 @@ export function startApp(client) {
     $('esp32Hint').hidden = !caps.esp32;
 
     const alerts = startAlerts(client, { toast, onLog: addLog });
+    startCharts(client, { getAlertConfig: () => alerts.engine.config });
     startCalibration(client, { toast, onLog: addLog, getState: () => state, alerts });
     startTrips(client, { toast, onLog: addLog, getState: () => state, alerts });
 

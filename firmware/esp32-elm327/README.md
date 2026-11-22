@@ -7,7 +7,7 @@ El ESP32 crea su propia red Wi-Fi, se conecta al ELM327 por Bluetooth y sirve el
                                           └─ servidor web http://192.168.4.1  (http://obd.local)
 ```
 
-**Estado: fase 2** (panel OBD2 completo por el ESP32). Ver [fases](#fases).
+**Estado: fase 2 + base de fase 3** (panel OBD2 completo por el ESP32; alertas sin panel abierto implementadas, pendientes de prueba en auto). Ver [fases](#fases).
 
 El panel de diagnóstico (`/`) es **el mismo `packages/ui` + `packages/core`** que usan la PWA y el servidor: se empaqueta desde el repositorio en cada compilación. Todo ajuste al core o a la interfaz (reconexión, filtro de picos de velocidad, escala de velocidad, grabación, alertas…) llega al ESP32 al volver a compilar y cargar; no hay una copia en C++ que mantener.
 
@@ -20,7 +20,24 @@ El panel de diagnóstico (`/`) es **el mismo `packages/ui` + `packages/core`** q
 | ESP32-S2 / S3 / C3 / C6 | ❌ no tienen Bluetooth Classic: no pueden hablar con un ELM327 Bluetooth SPP |
 | ESP-01 (ESP8266) | ❌ sin Bluetooth |
 
+**Alimentación:**
+- **Para pruebas en taller:** El ESP32 necesita **alimentación estable de 5V/1A o más**. Un cargador de móvil de pared funciona mejor que el puerto USB de una laptop.
+- **Si no hay ELM327 conectado:** El ESP32 puede tardar más en inicializar o no mostrar salida serial. Usa el **simulador** (`npm run esp32:mock`) para pruebas sin hardware.
+
 **Alimentación en el auto:** convertidor de 12 V a 5 V (por ejemplo, un cargador USB de encendedor o un módulo reductor) al pin 5V/VIN o al USB. El ELM327 se queda en el conector OBD.
+
+## Simulador (sin hardware)
+
+Para probar sin el auto o sin hardware físico:
+
+```bash
+npm run esp32:mock
+```
+
+Abre `http://localhost:8032` - simula el ESP32 con un ELM327 virtual. El panel funciona igual que el hardware real.Útil para:
+- Desarrollo sin el auto
+- Pruebas de la interfaz web
+- Verificar que los comandos funcionan
 
 ## Compilar y cargar (PlatformIO)
 
@@ -34,8 +51,8 @@ pio test -e native                 # pruebas de la lógica en la PC (necesita gc
 ```
 
 - Antes de cada compilación, `scripts/embed_web.py` ejecuta `tools/build-web.mjs` (**necesita Node.js**): comprime `web/*.html`, `packages/ui` y `packages/core` y los incrusta en el firmware (`include/web_assets.h`). No hace falta subir un sistema de archivos. Las voces grabadas (`sounds/*.wav`, ~2.5 MB) no se incluyen: el navegador dice las mismas frases con su voz sintética.
-- Particiones `min_spiffs.csv`: Bluetooth + Wi-Fi + servidor web no caben en la partición de 1.25 MB por defecto.
-- Tamaño en la fase 2: RAM 18.9 % (62 KB), flash 90.5 % de 1.9 MB (el panel y el core ocupan ~92 KB comprimidos). Si las fases 3–4 no caben, se pasa a `huge_app.csv` (3 MB, sin OTA) o a una placa de 8–16 MB.
+- Particiones `huge_app.csv`: ~3.15 MB para la app, **sin OTA** (más espacio para fase 3/4). Si se necesita OTA, volver a `min_spiffs.csv`.
+- Tamaño actual (fase 3 base, 2026-11-21): RAM 18.9 % (62 KB), flash 56.9 % de 3 MB.
 - **Driver USB:** la mayoría de las placas DevKit usan el chip CP2102 (driver «CP210x Universal Windows Driver» de Silicon Labs) o el CH340 (driver de WCH). Sin el driver, Windows muestra el dispositivo con error y no crea el puerto COM.
 - En Windows, si la compilación falla con `CreateProcess: No such file or directory`, la ruta de la carpeta de PlatformIO es demasiado larga: usa la de por defecto (`%USERPROFILE%\.platformio`).
 
@@ -101,6 +118,7 @@ Todas las rutas, salvo `/login`, `/api/login` y los archivos del panel (`/src/�
 | `POST /api/bt/connect` (`mac`, `pin`, `name`), `POST /api/bt/disconnect` | conexión |
 | `POST /api/elm/init`, `/api/elm/voltage`, `/api/elm/ecu-test` | pruebas |
 | `POST /api/elm/cmd` (`cmd`) | terminal (lista de permitidos) |
+| `GET/POST /api/alerts` (`enabled`, `buzzer`) | alertas fase 3 sin panel abierto |
 | `GET/POST /api/settings`, `POST /api/restart` | ajustes |
 | `GET /` · `GET /esp32` · `GET /login` | panel OBD2 · ajustes del ESP32 · ingreso |
 | `GET /src/…`, `/vendor/…` | archivos del panel y del core (gzip, `ETag` por compilación) |
@@ -139,5 +157,5 @@ firmware/esp32-elm327/
 1. ✅ **Comunicación:** Bluetooth con el ELM327, red Wi-Fi con ingreso, prueba de ECU, terminal segura, registro en vivo.
 2. ✅ **Panel OBD2 completo:** el panel de `packages/ui` servido por el ESP32 y la sesión del core en el navegador, conectada por el puente WebSocket. Con eso llegan tiempo real (con el filtro de picos y la escala de velocidad confirmada), códigos con reporte, borrar códigos con confirmación, información de la ECU, vigilancia de batería, reconexión escalonada, alertas y grabación. No se pasa la decodificación a C++: el core se comparte tal cual.
    *Fases 1 y 2: falta probarlas en la placa y en el auto.*
-3. **Sin el panel abierto:** lo que tiene que funcionar con el teléfono guardado. Vigilancia de batería y alertas críticas (sobrecalentamiento, no carga) en C++ con un zumbador, y lectura periódica de códigos.
+3. ⚠️ **Sin el panel abierto (base implementada):** vigilancia de batería (ATRV) y alertas críticas (sobrecalentamiento, no carga) en C++ con zumbador opcional (`BUZZER_PIN`). La lectura se hace con una máquina de estados **no bloqueante** (`cmdBegin/cmdPoll`, `alertTick`, `beepTick`) para no interferir con el puente ni con trabajos del panel. Configurable por `/api/alerts` y en `/esp32`; persistido en NVS. *Falta validar en auto real y ajustar convivencia con sesión KWP/panel.*
 4. **Extras:** grabación en el ESP32 (memoria interna o microSD de la ESP32-CAM), actualización por Wi-Fi (OTA), `https` o un dominio para tener GPS en el panel.

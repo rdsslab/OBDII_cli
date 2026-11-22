@@ -41,17 +41,27 @@ static String sessionToken(AsyncWebServerRequest* r) {
 static bool authed(AsyncWebServerRequest* r) { return sessions.check(sessionToken(r).c_str(), millis()); }
 
 static void sendJson(AsyncWebServerRequest* r, int code, const JsonDocument& doc) {
+    if (ESP.getMaxAllocHeap() < 4096) {
+        AsyncWebServerResponse* res = r->beginResponse(503, "text/plain; charset=utf-8", "memoria baja");
+        res->addHeader("Connection", "close");
+        r->send(res);
+        return;
+    }
     String out;
     serializeJson(doc, out);
     AsyncWebServerResponse* res = r->beginResponse(code, "application/json; charset=utf-8", out);
     res->addHeader("Cache-Control", "no-store");
+    res->addHeader("Connection", "close");
     r->send(res);
 }
 
 static void sendError(AsyncWebServerRequest* r, int code, const String& msg) {
-    JsonDocument d;
-    d["error"] = msg;
-    sendJson(r, code, d);
+    // Avoid JsonDocument allocation when heap is critical.
+    String out = "{\"error\":\"" + msg + "\"}";
+    AsyncWebServerResponse* res = r->beginResponse(code, "application/json; charset=utf-8", out);
+    res->addHeader("Cache-Control", "no-store");
+    res->addHeader("Connection", "close");
+    r->send(res);
 }
 
 static void sendOk(AsyncWebServerRequest* r) {
@@ -67,9 +77,11 @@ static String param(AsyncWebServerRequest* r, const char* name) {
 }
 
 static void sendPage(AsyncWebServerRequest* r, const uint8_t* data, size_t len) {
+    Serial.printf("[req] %s %s -> page %u\n", r->methodToString(), r->url().c_str(), (unsigned)len);
     AsyncWebServerResponse* res = r->beginResponse(200, "text/html; charset=utf-8", data, len);
     res->addHeader("Content-Encoding", "gzip");
     res->addHeader("Cache-Control", "no-store");
+    res->addHeader("Connection", "close");
     r->send(res);
 }
 
@@ -80,15 +92,19 @@ static bool sendAsset(AsyncWebServerRequest* r) {
     for (size_t i = 0; i < APP_ASSETS_COUNT; i++) {
         const WebAsset& a = APP_ASSETS[i];
         if (url != a.path) continue;
+        Serial.printf("[req] %s %s\n", r->methodToString(), url.c_str());
         const AsyncWebHeader* inm = r->getHeader("If-None-Match");
         if (inm && inm->value() == "\"" WEB_BUILD_ID "\"") {
-            r->send(304);
+            AsyncWebServerResponse* res = r->beginResponse(304);
+            res->addHeader("Connection", "close");
+            r->send(res);
             return true;
         }
         AsyncWebServerResponse* res = r->beginResponse(200, a.type, a.data, a.len);
         res->addHeader("Content-Encoding", "gzip");
         res->addHeader("Cache-Control", "no-cache");
         res->addHeader("ETag", "\"" WEB_BUILD_ID "\"");
+        res->addHeader("Connection", "close");
         r->send(res);
         return true;
     }
@@ -98,6 +114,13 @@ static bool sendAsset(AsyncWebServerRequest* r) {
 // Wrap a handler so it only runs for a logged-in session.
 static ArRequestHandlerFunction guarded(ArRequestHandlerFunction fn) {
     return [fn](AsyncWebServerRequest* r) {
+        Serial.printf("[req] %s %s\n", r->methodToString(), r->url().c_str());
+        if (ESP.getMaxAllocHeap() < 4096) {
+            AsyncWebServerResponse* res = r->beginResponse(503, "text/plain; charset=utf-8", "memoria baja");
+            res->addHeader("Connection", "close");
+            r->send(res);
+            return;
+        }
         if (!authed(r)) return sendError(r, 401, "Sesión no iniciada");
         fn(r);
     };
@@ -146,6 +169,10 @@ static void stateJson(JsonDocument& d) {
     br["active"] = ownerId != 0;
     br["ready"] = ownerReady;
     br["ip"] = ownerId ? ownerIp : String("");
+    JsonObject al = d["alerts"].to<JsonObject>();
+    al["enabled"] = s.alertsEnabled;
+    al["buzzer"] = s.buzzerEnabled;
+    al["last"] = s.alert;
 }
 
 static void bridgeText(uint32_t id, const JsonDocument& d) {
@@ -271,6 +298,7 @@ static void sendEvent(const char* name, const JsonDocument& d, uint32_t id = 0) 
 static void redirect(AsyncWebServerRequest* r, const char* to) {
     AsyncWebServerResponse* res = r->beginResponse(302);
     res->addHeader("Location", to);
+    res->addHeader("Connection", "close");
     r->send(res);
 }
 
@@ -363,6 +391,33 @@ void begin(Settings* settings) {
         queued(r, [&](String& w) { return elm.command(cmd, w); });
     }));
 
+    // Phase 3 alerts
+    server.on("/api/alerts", HTTP_GET, guarded([](AsyncWebServerRequest* r) {
+        const ElmStatus s = elm.status();
+        JsonDocument d;
+        d["enabled"] = s.alertsEnabled;
+        d["buzzer"] = s.buzzerEnabled;
+        d["last"] = s.alert;
+        sendJson(r, 200, d);
+    }));
+    server.on("/api/alerts", HTTP_POST, guarded([](AsyncWebServerRequest* r) {
+        const ElmStatus s = elm.status();
+        bool enabled = s.alertsEnabled;
+        bool buzzer = s.buzzerEnabled;
+        if (r->hasParam("enabled", true) || r->hasParam("enabled")) enabled = param(r, "enabled") == "1" || param(r, "enabled") == "true";
+        if (r->hasParam("buzzer", true) || r->hasParam("buzzer")) buzzer = param(r, "buzzer") == "1" || param(r, "buzzer") == "true";
+        elm.setAlerts(enabled, buzzer);
+        cfg->alertsEnabled = enabled;
+        cfg->buzzerEnabled = buzzer;
+        settings::save(*cfg);
+        bus.info(String("Alertas fase 3: ") + (enabled ? "activadas" : "desactivadas") + (enabled ? (buzzer ? " (buzzer activo)" : " (buzzer apagado)") : ""));
+        JsonDocument d;
+        d["ok"] = true;
+        d["enabled"] = enabled;
+        d["buzzer"] = buzzer;
+        sendJson(r, 200, d);
+    }));
+
     // Settings
     server.on("/api/settings", HTTP_GET, guarded([](AsyncWebServerRequest* r) {
         JsonDocument d;
@@ -405,8 +460,11 @@ void begin(Settings* settings) {
     }));
 
     // Live events (only for logged-in sessions)
-    events.setFilter([](AsyncWebServerRequest* r) { return authed(r); });
+    events.setFilter([](AsyncWebServerRequest* r) {
+        return ESP.getMaxAllocHeap() >= 8192 && authed(r);
+    });
     events.onConnect([](AsyncEventSourceClient* c) {
+        if (ESP.getMaxAllocHeap() < 8192) return;
         JsonDocument d;
         stateJson(d);
         String out;
@@ -416,13 +474,22 @@ void begin(Settings* settings) {
     server.addHandler(&events);
 
     // Bridge to the ELM327 for the OBD2 panel (only for logged-in sessions)
-    ws.setFilter([](AsyncWebServerRequest* r) { return authed(r); });
+    ws.setFilter([](AsyncWebServerRequest* r) {
+        return ESP.getMaxAllocHeap() >= 8192 && authed(r);
+    });
     ws.onEvent(onBridgeEvent);
     server.addHandler(&ws);
 
     // Panel files; captive portal: phones probe a few URLs after joining
     // the network, anything unknown goes to the login page.
     server.onNotFound([](AsyncWebServerRequest* r) {
+        Serial.printf("[req] %s %s -> notfound\n", r->methodToString(), r->url().c_str());
+        if (ESP.getMaxAllocHeap() < 4096) {
+            AsyncWebServerResponse* res = r->beginResponse(503, "text/plain; charset=utf-8", "memoria baja");
+            res->addHeader("Connection", "close");
+            r->send(res);
+            return;
+        }
         if (r->method() == HTTP_GET && sendAsset(r)) return;
         if (r->url().startsWith("/api/")) return sendError(r, 404, "No encontrado");
         redirect(r, "http://192.168.4.1/login");
@@ -454,6 +521,14 @@ void loop() {
         }
     } else {
         bus.drain(logCursor, [](const LogLine&) {});   // nobody listening: just advance
+    }
+    static uint32_t lastDiagMs = 0;
+    if (now - lastDiagMs > 5000) {
+        lastDiagMs = now;
+        Serial.printf("[diag] heap=%u max=%u wifi=%u sse=%u ws=%u\n",
+                      (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap(),
+                      (unsigned)WiFi.softAPgetStationNum(),
+                      (unsigned)events.count(), (unsigned)ws.count());
     }
     if (restartAt && static_cast<int32_t>(now - restartAt) > 0) {
         delay(100);

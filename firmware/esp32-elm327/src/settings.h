@@ -11,6 +11,8 @@ struct Settings {
     String elmMac;       // "AA:BB:CC:DD:EE:FF" or empty
     String elmName;      // name seen when scanning (display only)
     String elmPin;
+    bool alertsEnabled = true;   // Phase 3: alerts without panel open
+    bool buzzerEnabled = true;   // Phase 3: buzzer output
 };
 
 namespace settings {

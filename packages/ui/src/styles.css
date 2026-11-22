@@ -7,6 +7,7 @@
   --border: #d9dee4;
   --accent: #0284c7;
   --accent-text: #ffffff;
+  --cool: #0284c7;
   --ok: #15803d;
   --warn: #b45309;
   --bad: #b91c1c;
@@ -27,6 +28,7 @@
     --border: #263342;
     --accent: #38bdf8;
     --accent-text: #04121c;
+    --cool: #38bdf8;
     --ok: #4ade80;
     --warn: #fbbf24;
     --bad: #f87171;
@@ -38,7 +40,7 @@
 
 :root[data-theme="dark"] {
   --bg: #0b1117; --surface: #131c25; --surface-2: #1b2632; --text: #e8edf2; --muted: #91a0ae;
-  --border: #263342; --accent: #38bdf8; --accent-text: #04121c; --ok: #4ade80; --warn: #fbbf24;
+  --border: #263342; --accent: #38bdf8; --accent-text: #04121c; --cool: #38bdf8; --ok: #4ade80; --warn: #fbbf24;
   --bad: #f87171; --bar: #38bdf8; --shadow: none; color-scheme: dark;
 }
 
@@ -139,8 +141,34 @@ dialog .actions { justify-content: flex-end; }
 .tile .bar { height: 6px; border-radius: 3px; background: var(--surface-2); margin-top: 8px; overflow: hidden; }
 .tile .bar i { display: block; height: 100%; width: 0; background: var(--bar); transition: width .2s linear; }
 .tile.warn .bar i { background: var(--bad); }
+.tile[data-zone="cool"] .value { color: var(--cool); }
+.tile[data-zone="ok"] .value { color: var(--ok); }
+.tile[data-zone="warn"] .value { color: var(--warn); }
+.tile[data-zone="bad"] .value { color: var(--bad); }
+.tile[data-zone="cool"] .bar i { background: var(--cool); }
+.tile[data-zone="ok"] .bar i { background: var(--ok); }
+.tile[data-zone="warn"] .bar i { background: var(--warn); }
+.tile[data-zone="bad"] .bar i { background: var(--bad); }
+.tile[data-zone="bad"] { border-color: color-mix(in srgb, var(--bad) 55%, var(--border)); }
+.tile[data-zone="bad"] .value { animation: blink 1s infinite; }
 .tile .mm { font-size: .72rem; color: var(--muted); margin-top: 6px; font-variant-numeric: tabular-nums; }
 .raw { margin-top: 16px; }
+
+/* Gráficas en tiempo real (mismo orden que los mosaicos) */
+.chart-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; box-shadow: var(--shadow); min-width: 0; }
+.chart-card header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.chart-card .name { font-size: .82rem; color: var(--muted); }
+.chart-card .now { font-size: 1.05rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.chart-card[data-zone="cool"] .now { color: var(--cool); }
+.chart-card[data-zone="ok"] .now { color: var(--ok); }
+.chart-card[data-zone="warn"] .now { color: var(--warn); }
+.chart-card[data-zone="bad"] .now { color: var(--bad); }
+.chart-card .plot { position: relative; height: 130px; }
+.chart-card canvas { display: block; width: 100%; height: 100%; }
+.chart-card .no-data { position: absolute; inset: 0; display: grid; place-items: center; font-size: .8rem; color: var(--muted); pointer-events: none; }
+.chart-card footer { display: flex; justify-content: space-between; font-size: .7rem; color: var(--muted); margin-top: 4px; font-variant-numeric: tabular-nums; }
+@media (max-width: 480px) { .chart-grid { grid-template-columns: 1fr; } .chart-card .plot { height: 110px; } }
 .raw summary { cursor: pointer; color: var(--muted); font-size: .85rem; }
 .raw code { display: block; margin-top: 8px; font-size: .75rem; overflow-wrap: anywhere; color: var(--muted); }
 
@@ -234,5 +262,10 @@ input[type="number"] { width: 100%; padding: 8px 10px; border-radius: 8px; borde
 .trip-item .btn { padding: 6px 12px; min-height: 36px; }
 .rec-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--bad); margin-right: 6px; animation: blink 1s infinite; vertical-align: middle; }
 #tripStatus { font-variant-numeric: tabular-nums; }
+@media (max-width: 520px) {
+  .tabs { overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs button { flex: 0 0 auto; min-width: 66px; }
+}
 @media (max-width: 380px) { .tabs button { font-size: .66rem; } }
 #tab-rec .settings-grid { margin-top: 12px; }

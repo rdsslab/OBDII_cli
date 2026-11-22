@@ -5,6 +5,11 @@
 #include "config.h"
 #include "events.h"
 #include "obd_text.h"
+#include "kwp_decode.h"
+
+#if BUZZER_PIN > 0
+#include <Arduino.h>
+#endif
 
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
 #error "Bluetooth Classic is not enabled: use a classic ESP32 (WROOM-32 / WROVER), not S2/S3/C3/C6."
@@ -58,6 +63,35 @@ void ElmLink::setBt(BtState s, const String& error) {
         st.error = error;
         if (s != BtState::Connected) { st.elmReady = false; st.ecu = "sin probar"; }
     });
+    // Update LED feedback
+    if (BT_STATUS_LED_PIN && ledEnabled_) {
+        switch (s) {
+            case BtState::Connecting:
+                // Fast blink while connecting
+                for (int i = 0; i < 3; i++) {
+                    digitalWrite(BT_STATUS_LED_PIN, LOW);
+                    delay(50);
+                    digitalWrite(BT_STATUS_LED_PIN, HIGH);
+                    delay(50);
+                }
+                break;
+            case BtState::Connected:
+                // Solid on when connected
+                digitalWrite(BT_STATUS_LED_PIN, LOW);
+                break;
+            case BtState::Idle:
+            case BtState::Scanning:
+                // Medium blink for idle/scanning
+                digitalWrite(BT_STATUS_LED_PIN, LOW);
+                delay(100);
+                digitalWrite(BT_STATUS_LED_PIN, HIGH);
+                break;
+            default:
+                // Off for error/off states
+                digitalWrite(BT_STATUS_LED_PIN, HIGH);
+                break;
+        }
+    }
 }
 
 void ElmLink::begin(Settings* settings) {
@@ -69,8 +103,85 @@ void ElmLink::begin(Settings* settings) {
     st_.mac = settings->elmMac;
     st_.name = settings->elmName;
     st_.autoReconnect = settings->elmMac.length() == 17;
+    st_.alertsEnabled = settings->alertsEnabled;
+    st_.buzzerEnabled = settings->buzzerEnabled;
+    maxReconnectFails_ = BT_MAX_AUTO_RECONNECT_FAILS;
+    alertsEnabled_ = settings->alertsEnabled;
+    buzzerEnabled_ = settings->buzzerEnabled;
+    reconnectFails_ = 0;
+    reconnectGaveUp_ = false;
+    alertPhase_ = AlertPhase::Idle;
+    alertNextMs_ = 0;
+    alertCooldownUntilMs_ = 0;
+    lastBatteryWatchMs_ = 0;
+    alertKwpInitTried_ = false;
+    cmdActive_ = false;
+    beepRemaining_ = 0;
+    beepOn_ = false;
+    // Initialize status LED if configured
+    if (BT_STATUS_LED_PIN) {
+        pinMode(BT_STATUS_LED_PIN, OUTPUT);
+        digitalWrite(BT_STATUS_LED_PIN, HIGH);  // LED OFF (active LOW on most boards)
+    }
+    ledEnabled_ = true;
+    // Initialize buzzer if configured
+#if defined(BUZZER_PIN) && BUZZER_PIN > 0
+    pinMode(BUZZER_PIN, OUTPUT);
+    digitalWrite(BUZZER_PIN, LOW);  // Buzzer off (active HIGH)
+#endif
     // Core 1 (Arduino loop core); AsyncTCP runs on core 0.
     xTaskCreatePinnedToCore(taskEntry, "elm", 8192, this, 2, nullptr, 1);
+}
+
+void ElmLink::setLed(bool on) {
+    ledEnabled_ = on;
+    if (BT_STATUS_LED_PIN && ledEnabled_) {
+        digitalWrite(BT_STATUS_LED_PIN, on ? LOW : HIGH);
+    }
+}
+
+bool ElmLink::cmdBegin(const String& cmd, uint32_t timeoutMs) {
+    if (!SerialBT.connected()) return false;
+    while (SerialBT.available()) SerialBT.read();     // drop stale bytes
+    cmdBuf_ = "";
+    cmdEcho_ = cmd;
+    cmdStartMs_ = millis();
+    cmdTimeoutMs_ = timeoutMs;
+    cmdActive_ = true;
+    bus.log('t', cmd);
+    SerialBT.print(cmd);
+    SerialBT.print('\r');
+    return true;
+}
+
+int ElmLink::cmdPoll(String& out) {
+    if (!cmdActive_) return -1;
+    if (!SerialBT.connected()) {
+        cmdActive_ = false;
+        out = "TIMEOUT";
+        return -1;
+    }
+    while (SerialBT.available()) {
+        const char c = static_cast<char>(SerialBT.read());
+        if (c == '>') {
+            cmdActive_ = false;
+            out = String(obd::cleanResponse(cmdBuf_.c_str(), cmdEcho_.c_str()).c_str());
+            update([](ElmStatus& st) { st.lastRxMs = millis(); });
+            String shown = out;
+            shown.replace("\n", " | ");
+            bus.log('r', shown.length() ? shown : String("(vacío)"));
+            return 1;
+        }
+        if (cmdBuf_.length() < 2048) cmdBuf_ += c;
+    }
+    if (millis() - cmdStartMs_ >= cmdTimeoutMs_) {
+        cmdActive_ = false;
+        out = "TIMEOUT";
+        String shown = out;
+        bus.log('r', shown);
+        return -1;
+    }
+    return 0;
 }
 
 ElmStatus ElmLink::status() {
@@ -158,12 +269,17 @@ void ElmLink::taskLoop() {
 
     for (;;) {
         if (bridge_) {
+            if (cmdActive_) cmdActive_ = false;   // bridge owns the link
+            alertPhase_ = AlertPhase::Idle;
             pumpBridge();                 // waits up to a few ms for browser bytes
             maintain();
             continue;
         }
         Job j;
-        if (xQueueReceive(jobs_, &j, pdMS_TO_TICKS(500)) == pdTRUE) {
+        const uint32_t waitMs = cmdActive_ ? 20 : 200;
+        if (xQueueReceive(jobs_, &j, pdMS_TO_TICKS(waitMs)) == pdTRUE) {
+            if (cmdActive_) cmdActive_ = false;   // job takes priority
+            alertPhase_ = AlertPhase::Idle;
             run(j);
             continue;
         }
@@ -179,13 +295,23 @@ void ElmLink::maintain() {
             bus.warn("Se perdió la conexión Bluetooth con el adaptador");
             setBt(BtState::Error, "Conexión Bluetooth perdida");
             kwpFraming_ = false;
+            cmdActive_ = false;
+            alertPhase_ = AlertPhase::Idle;
         }
         if (s.autoReconnect && s.bt != BtState::Connected && s.bt != BtState::Off &&
             settings_->elmMac.length() == 17 && millis() - lastAttemptMs_ > BT_CONNECT_RETRY_MS) {
-            update([](ElmStatus& st) { st.busy = true; st.job = "reconectar"; });
-            doConnect(settings_->elmMac, settings_->elmPin, settings_->elmName, true);
-            update([](ElmStatus& st) { st.busy = false; st.job = ""; });
+            if (reconnectFails_ < maxReconnectFails_) {
+                update([](ElmStatus& st) { st.busy = true; st.job = "reconectar"; });
+                doConnect(settings_->elmMac, settings_->elmPin, settings_->elmName, true);
+                update([](ElmStatus& st) { st.busy = false; st.job = ""; });
+            } else if (!reconnectGaveUp_) {
+                reconnectGaveUp_ = true;
+                update([](ElmStatus& st) { st.autoReconnect = false; st.error = "Auto-reconexión detenida tras varios fallos"; });
+                bus.warn("Auto-reconexión detenida tras " + String(maxReconnectFails_) + " intentos. Conecta manualmente desde el panel.");
+            }
         }
+        beepTick();
+        alertTick();
     }
 }
 
@@ -208,7 +334,9 @@ size_t ElmLink::bridgeRead(uint8_t* data, size_t max) {
 
 void ElmLink::kickReconnect() {
     if (settings_->elmMac.length() != 17) return;
-    update([](ElmStatus& st) { st.autoReconnect = true; });
+    reconnectFails_ = 0;
+    reconnectGaveUp_ = false;
+    update([](ElmStatus& st) { st.autoReconnect = true; st.error = ""; });
     lastAttemptMs_ = millis() - BT_CONNECT_RETRY_MS - 1;
 }
 
@@ -238,7 +366,7 @@ void ElmLink::run(const Job& j) {
     update([&](ElmStatus& st) { st.busy = true; st.job = names[j.type]; });
     switch (j.type) {
         case J_SCAN: doScan(); break;
-        case J_CONNECT: reconnectFails_ = 0; doConnect(j.arg, j.arg2, j.arg3, false); break;
+        case J_CONNECT: reconnectFails_ = 0; reconnectGaveUp_ = false; doConnect(j.arg, j.arg2, j.arg3, false); break;
         case J_DISCONNECT: doDisconnect(true); break;
         case J_INIT: doInit(); break;
         case J_CMD: doCommand(j.arg); break;
@@ -293,6 +421,8 @@ void ElmLink::doConnect(const String& mac, const String& pin, const String& name
     }
     kwpFraming_ = false;
     reconnectFails_ = 0;
+    reconnectGaveUp_ = false;
+    alertKwpInitTried_ = false;
     setBt(BtState::Connected);
     bus.info("Conectado por Bluetooth a " + mac);
     // Remember this adapter and reconnect to it automatically
@@ -302,7 +432,7 @@ void ElmLink::doConnect(const String& mac, const String& pin, const String& name
         if (name.length()) settings_->elmName = name;
         settings::save(*settings_);
     }
-    update([](ElmStatus& st) { st.autoReconnect = true; });
+    update([](ElmStatus& st) { st.autoReconnect = true; st.error = ""; });
     doInit();
 }
 
@@ -415,6 +545,7 @@ void ElmLink::doEcuTest() {
             } else {
                 bus.warn("Sesión activa, pero 21 01 no respondió como se esperaba");
             }
+            alertKwpInitTried_ = false;
             update([](ElmStatus& st) { st.ecu = "responde"; st.protocol = "ISO 14230-4 KWP (fast init)"; });
             return;
         }
@@ -424,4 +555,170 @@ void ElmLink::doEcuTest() {
     }
     update([](ElmStatus& st) { st.ecu = "sin respuesta"; });
     bus.warn("La ECU no respondió. ¿Contacto en ON?");
+}
+
+// ── Phase 3: non-blocking alerts ────────────────────────────
+
+void ElmLink::alertSet(const String& msg) {
+    update([&](ElmStatus& st) { st.alert = msg; });
+}
+
+void ElmLink::setAlerts(bool enabled, bool buzzer) {
+    xSemaphoreTake(mtx_, portMAX_DELAY);
+    alertsEnabled_ = enabled;
+    buzzerEnabled_ = buzzer;
+    st_.alertsEnabled = enabled;
+    st_.buzzerEnabled = buzzer;
+    if (!enabled) st_.alert = "";
+    xSemaphoreGive(mtx_);
+    if (!enabled) {
+        cmdActive_ = false;
+        alertPhase_ = AlertPhase::Idle;
+        beepRemaining_ = 0;
+        beepOn_ = false;
+#if defined(BUZZER_PIN) && BUZZER_PIN > 0
+        digitalWrite(BUZZER_PIN, LOW);
+#endif
+    }
+    bus.stateChanged();
+}
+
+void ElmLink::beepStart(uint8_t pattern) {
+#if defined(BUZZER_PIN) && BUZZER_PIN > 0
+    if (!buzzerEnabled_) return;
+    // pattern 1 = warning (2 beeps), 2 = critical (3 beeps)
+    beepRemaining_ = (pattern >= 2) ? 3 : 2;
+    beepDurMs_ = (pattern >= 2) ? BEEP_CRITICAL_MS : BEEP_WARNING_MS;
+    beepOn_ = true;
+    beepNextMs_ = millis() + beepDurMs_;
+    digitalWrite(BUZZER_PIN, HIGH);
+#else
+    (void)pattern;
+#endif
+}
+
+void ElmLink::beepTick() {
+#if defined(BUZZER_PIN) && BUZZER_PIN > 0
+    if (beepRemaining_ == 0) return;
+    const uint32_t now = millis();
+    if (static_cast<int32_t>(now - beepNextMs_) < 0) return;
+    if (beepOn_) {
+        digitalWrite(BUZZER_PIN, LOW);
+        beepOn_ = false;
+        beepRemaining_--;
+        if (beepRemaining_ == 0) return;
+        beepNextMs_ = now + BEEP_INTERVAL_MS;
+    } else {
+        digitalWrite(BUZZER_PIN, HIGH);
+        beepOn_ = true;
+        beepNextMs_ = now + beepDurMs_;
+    }
+#endif
+}
+
+void ElmLink::alertTick() {
+    if (bridge_) return;
+
+    const ElmStatus s = status();
+    if (s.bt != BtState::Connected || !s.elmReady) {
+        if (cmdActive_ || alertPhase_ != AlertPhase::Idle) { cmdActive_ = false; alertPhase_ = AlertPhase::Idle; }
+        return;
+    }
+    if (!alertsEnabled_) {
+        if (cmdActive_) { cmdActive_ = false; alertPhase_ = AlertPhase::Idle; }
+        return;
+    }
+    if (s.busy) {
+        if (cmdActive_) { cmdActive_ = false; alertPhase_ = AlertPhase::Idle; }
+        return;
+    }
+
+    const uint32_t now = millis();
+
+    // Poll pending alert command
+    if (cmdActive_) {
+        String out;
+        const int r = cmdPoll(out);
+        if (r == 0) return;  // still waiting, non-blocking
+
+        if (alertPhase_ == AlertPhase::Wait2101) {
+            alertPhase_ = AlertPhase::Idle;
+            const bool ecuWasResponding = (s.ecu == "responde");
+            alertNextMs_ = now + (ecuWasResponding ? FASE3_READ_INTERVAL_MS : 30000);
+            if (r == 1 && kwp::isValid2101Response(std::string(out.c_str()))) {
+                std::vector<uint8_t> data = kwp::hexToBytes(out);  // strips 61 01 prefix
+                if (data.size() >= 78) {
+                    kwp::EngineData eng = kwp::decode2101(data);
+                    if (eng.valid) {
+                        if (!ecuWasResponding) {
+                            update([](ElmStatus& st) { if (st.ecu != "responde") st.ecu = "responde"; });
+                            alertNextMs_ = now + FASE3_READ_INTERVAL_MS;
+                        }
+                        if (eng.rpm > 1000 && eng.coolantTemp > ALERT_COOLANT_MAX_C) {
+                            const String msg = "Sobrecalentamiento: " + String(eng.coolantTemp, 1) + " °C";
+                            bus.warn(msg);
+                            alertSet(msg);
+                            beepStart(2);
+                            alertCooldownUntilMs_ = now + 10000;  // cooldown 10s
+                            return;
+                        }
+                        if (eng.rpm > 1000 && eng.voltage > 0 && eng.voltage < ALERT_VOLTAGE_NO_CHARGE_MIN) {
+                            const String msg = "Batería no cargando: " + String(eng.voltage, 1) + " V";
+                            bus.warn(msg);
+                            alertSet(msg);
+                            beepStart(2);
+                            alertCooldownUntilMs_ = now + 10000;
+                            return;
+                        }
+                        // Clear recoverable alerts if readings are back to normal
+                        if (s.alert.length() > 0 && !s.alert.startsWith("Batería baja")) alertSet("");
+                    }
+                }
+            }
+            return;
+        }
+
+        if (alertPhase_ == AlertPhase::WaitAtrv) {
+            alertPhase_ = AlertPhase::Idle;
+            lastBatteryWatchMs_ = now;
+            if (r == 1) {
+                float v = 0;
+                if (obd::parseVoltage(out.c_str(), v)) {
+                    if (v > 0 && v < ALERT_VOLTAGE_LOW_COLD_MIN) {
+                        const String msg = "Batería baja: " + String(v, 1) + " V";
+                        bus.warn(msg);
+                        alertSet(msg);
+                        beepStart(1);
+                        alertCooldownUntilMs_ = now + 30000;
+                        return;
+                    }
+                    if (s.alert.startsWith("Batería baja")) alertSet("");
+                }
+            }
+            return;
+        }
+
+        alertPhase_ = AlertPhase::Idle;
+        return;
+    }
+
+    // Cooldown after an alert fired
+    if (alertCooldownUntilMs_ && static_cast<int32_t>(now - alertCooldownUntilMs_) < 0) return;
+    alertCooldownUntilMs_ = 0;
+
+    // Schedule: engine data check. If ECU not confirmed yet, probe less often
+    // to avoid spamming the bus; a valid 61 01 response will mark it as responding.
+    const uint32_t interval = (s.ecu == "responde") ? FASE3_READ_INTERVAL_MS : 30000;
+    if (static_cast<int32_t>(now - alertNextMs_) >= 0) {
+        alertPhase_ = AlertPhase::Wait2101;
+        if (!cmdBegin("2101", ELM_TIMEOUT_MS)) { alertPhase_ = AlertPhase::Idle; alertNextMs_ = now + interval; }
+        return;
+    }
+
+    // Battery watch with ATRV every 30s (lower priority than 2101 schedule)
+    if (static_cast<int32_t>(now - lastBatteryWatchMs_) >= static_cast<int32_t>(FASE3_BATTERY_WATCH_INTERVAL_MS)) {
+        alertPhase_ = AlertPhase::WaitAtrv;
+        if (!cmdBegin("ATRV", ELM_TIMEOUT_MS)) { alertPhase_ = AlertPhase::Idle; lastBatteryWatchMs_ = now; }
+        return;
+    }
 }

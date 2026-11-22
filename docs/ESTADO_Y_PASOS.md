@@ -1,6 +1,6 @@
 # Estado del proyecto y pasos hasta terminarlo
 
-Actualizado: 2026-11-20. Sirve para retomar el trabajo en otra máquina (**Linux**). Contiene lo hecho, cómo preparar el equipo, cómo cargar el ESP32 y qué falta, en orden.
+Actualizado: 2026-11-21 (fase 3: alertas no bloqueantes, API/UI, correcciones de bugs). Sirve para retomar el trabajo en otra máquina (**Linux**). Contiene lo hecho, cómo preparar el equipo, cómo cargar el ESP32 y qué falta, en orden.
 
 - Uso de cada aplicación: [README.md](../README.md).
 - Firmware: [firmware/esp32-elm327/README.md](../firmware/esp32-elm327/README.md).
@@ -20,7 +20,7 @@ Actualizado: 2026-11-20. Sirve para retomar el trabajo en otra máquina (**Linux
 | `packages/ui`: interfaz web común (tiempo real, códigos, ECU, alertas, grabación, calibración GPS) | ✅ | ✅ |
 | **ESP32, fase 1:** red Wi-Fi propia, ingreso con clave, Bluetooth al ELM327, prueba de ECU, terminal segura | ✅ compila | ❌ nunca se cargó en la placa |
 | **ESP32, fase 2:** el panel `packages/ui` servido por el ESP32 y la sesión del core en el navegador, por un puente WebSocket ↔ Bluetooth | ✅ compila, pruebas con el simulador | ❌ |
-| ESP32, fase 3: funciones sin el panel abierto (zumbador, vigilancia de batería) | ⏳ por hacer | — |
+| **ESP32, fase 3:** alertas sin panel abierto (zumbador, vigilancia de batería) con máquina de estados no bloqueante, API `/api/alerts`, controles en `/esp32` | ⚠️ implementado, falta probar en auto | — |
 | ESP32, fase 4: grabación en el ESP32, OTA, GPS | ⏳ por hacer | — |
 | Android (Capacitor) | ⏳ por hacer (ver PROYECTOS_FUTUROS.md) | — |
 
@@ -39,11 +39,18 @@ Limitaciones conocidas del panel servido por el ESP32:
 - **Voces sintéticas:** los WAV grabados (2.5 MB) no caben en el firmware.
 - **Grabaciones en el teléfono:** se guardan en IndexedDB, no en el ESP32.
 
-### Números de la última compilación (fase 2)
-- Firmware: RAM 18.9 % (62 KB); flash **90.5 %** de 1.9 MB (particiones `min_spiffs.csv`).
-- Panel + core empaquetados: 29 archivos, 292 KB → 92 KB gzip.
-- `npm test`: 54 pruebas pasan, incluida `packages/ui/test/esp32-client.test.js`. Esa prueba levanta el simulador del firmware y recorre: conexión, tiempo real, códigos, corte del Bluetooth con reconexión, y otro dispositivo tomando el control.
-- `pio test -e native` **no se ha ejecutado nunca**: en Windows no había gcc. En Linux sí se puede (paso 4).
+### Números de la última compilación (fase 3, 2026-11-21)
+- Firmware: RAM 18.9 % (61.976 bytes); flash **56.9 %** de 3 MB (1.788.933 bytes, particiones `huge_app.csv`, **sin OTA**).
+- Panel + core empaquetados: 29 archivos, 292 KB → 92 KB gzip (se regeneran al compilar).
+- `pio test -e native`: ✅ 6 pruebas pasan en Linux.
+- `pio run -e esp32dev`: ✅ compila y se cargó en `/dev/ttyUSB0` (CP2102).
+
+### Correcciones de fase 3 (2026-11-21)
+- **Decodificación 2101:** `kwp_decode::hexToBytes()` ahora descarta el prefijo de respuesta positiva `61 01` antes de devolver los datos, evitando el corrimiento de 2 bytes.
+- **Alertas no bloqueantes:** la lectura de 2101/ATRV y el zumbador usan máquinas de estados (`cmdBegin/cmdPoll`, `alertTick`, `beepTick`) para no bloquear la tarea elm ni el puente.
+- **Auto-reconexión:** `kickReconnect()` resetea fallos; al alcanzar el máximo se avisa una vez y se detiene la auto-reconexión hasta conexión manual.
+- **Configuración persistente:** `alertsEnabled`/`buzzerEnabled` en NVS, expuestos en `/api/state` y `/api/alerts`.
+- **Limitación:** las alertas por 2101 dependen de una sesión KWP válida; si la ECU no respondió aún, el ESP32 sondea cada 30 s y marca `ecu=responde` al recibir `61 01` válido.
 
 ---
 
@@ -205,6 +212,16 @@ Corregir lo que falle, actualizar `firmware/esp32-elm327/README.md` y marcar «p
 
 ### Paso E: fase 3, funciones sin el panel abierto
 Objetivo: avisar aunque el teléfono esté guardado o apagado. Esto sí va en C++, en `elm_link.cpp`, y se ejecuta solo cuando **no** hay un navegador usando el puente.
+
+**Estado 2026-11-21:** base implementada (no bloqueante) y compilada; falta validación en auto real.
+- [x] Librería `lib/kwp_decode` con decodificación de 2101 (RPM, voltaje, temp refrigerante, estado motor, acelerador).
+- [x] Máquina de estados no bloqueante para alertas (`cmdBegin/cmdPoll`, `alertTick`, `beepTick`).
+- [x] Umbrales iniciales: sobrecalentamiento > 110 °C, no carga < 10.0 V con RPM > 1000, batería baja < 10.5 V con motor apagado (ATRV cada 30 s).
+- [x] Zumbador configurable por `BUZZER_PIN` (patrón warning/critical).
+- [x] API `/api/alerts` (GET/POST) y estado en `/api/state`.
+- [x] Controles en `/esp32` y persistencia en NVS (`alertsOn`, `buzzerOn`).
+- [ ] Confirmar en auto real: sesión KWP activa, valores decodificados correctos, patrones de zumbador.
+- [ ] Ajustar convivencia con panel (evitar doble alerta) y lectura periódica de DTC (18/FF00).
 1. **Hardware:** un zumbador activo de 5 V con un transistor NPN en un GPIO libre (por ejemplo GPIO 25), y opcionalmente un LED. Definir el pin en `config.h`.
 2. **Lectura periódica propia:** cada 2–5 s, inicio KWP (ya existe en `doEcuTest`) y `21 01`. Pasar a C++, en `lib/obd_text` y con pruebas nativas, **solo** los campos confirmados que hacen falta, copiando las fórmulas de `packages/core/src/ecu-profiles.js` (bloque `2101`, 78 bytes):
    - temperatura del refrigerante;
@@ -218,7 +235,7 @@ Objetivo: avisar aunque el teléfono esté guardado o apagado. Esto sí va en C+
 5. **Convivencia con el panel:** cuando un navegador toma el puente, el ESP32 detiene su lectura (ya ocurre: la tarea Bluetooth entra en modo puente). Al soltarlo, la reanuda. Opción: que el panel informe al ESP32 las alertas activas para no sonar dos veces.
 6. Lectura periódica de códigos (servicio `18`), con aviso por el zumbador si aparece un código nuevo.
 7. Ajustes en `/esp32`: activar o desactivar el zumbador y los umbrales, guardados en NVS (`settings.cpp`).
-8. **Espacio:** la flash está al 90.5 %. Si no alcanza, cambiar `board_build.partitions` a `huge_app.csv` (3 MB, sin OTA) o usar una placa con 8–16 MB.
+8. **Espacio:** resuelto temporalmente con `huge_app.csv` (3 MB, sin OTA); uso actual 56.9 %. Si se necesita OTA, volver a `min_spiffs.csv` o usar placa con más flash.
 9. Extender `tools/mock-server.mjs` con el mismo comportamiento y agregar pruebas.
 
 ### Paso F: fase 4, extras

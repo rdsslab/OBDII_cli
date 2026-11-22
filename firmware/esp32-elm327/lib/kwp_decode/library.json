@@ -1,0 +1,16 @@
+{
+    "name": "kwp_decode",
+    "version": "1.0.0",
+    "description": "KWP2000 data block decoding for Phase 3 alerts",
+    "authors": [
+        {
+            "name": "OBDII CLI"
+        }
+    ],
+    "license": "ISC",
+    "frameworks": "arduino",
+    "files": [
+        "src/kwp_decode.h",
+        "src/kwp_decode.cpp"
+    ]
+}

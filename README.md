@@ -50,7 +50,7 @@ Monorepo con *npm workspaces*: un núcleo independiente de la plataforma y una a
   - 📄 [**session.js**](packages/core/src/session.js): `ObdSession`, la sesión compartida (conexión, tiempo real con recuperación escalonada, borrado). La usan el servidor y la PWA.
   - 📄 [**sim-transport.js**](packages/core/src/sim-transport.js): ELM327 + ECU SIM2K-33 simulados con capturas reales, para pruebas y demostraciones sin el auto.
 - 📁 **packages/serial-node/** (`@obdii/serial-node`): transporte para Node.js con `serialport` (puerto COM / Bluetooth SPP). Lo usan la consola y el servidor web.
-- 📁 **packages/ui/** (`@obdii/ui`): interfaz web común, sin paso de compilación (HTML + CSS + JavaScript). Pantallas de conexión, tiempo real (con modo tablero), códigos, ECU y registro.
+- 📁 **packages/ui/** (`@obdii/ui`): interfaz web común, sin paso de compilación (HTML + CSS + JavaScript). Pantallas de conexión, tiempo real (con modo tablero), gráficas en tiempo real, códigos, ECU y registro.
 - 📁 **packages/web-serial/** (`@obdii/web-serial`): transporte Web Serial para el navegador (Chrome / Edge; adaptador USB o Bluetooth emparejado).
 - 📁 **apps/server/** (`@obdii/server`): servidor web local; se conecta al ELM327 y sirve la interfaz a todos los dispositivos de la red.
 - 📁 **apps/pwa/** (`@obdii/pwa`): app web instalable (PWA) que se conecta directo al ELM327 con Web Serial; se publica en GitHub Pages.
@@ -121,8 +121,9 @@ Al arrancar muestra las direcciones para abrir desde otros dispositivos (por eje
 
 **Funciones:**
 - **Conexión:** elegir puerto (marca el Bluetooth saliente como "probable ELM327") y perfil de ECU.
-- **Tiempo real:** el servidor lee la ECU **una sola vez** y envía cada muestra a todos los dispositivos (Server-Sent Events). Tarjetas con valor, barra y mín/máx. Las escalas sin confirmar llevan la marca "sin confirmar".
+- **Tiempo real:** el servidor lee la ECU **una sola vez** y envía cada muestra a todos los dispositivos (Server-Sent Events). Tarjetas con valor, barra y mín/máx, siempre en este orden: velocidad, RPM, temperatura, batería, acelerador, estado del motor y el resto. El color pasa de azul (frío/bajo) a verde, ámbar cerca del máximo y rojo en zona peligrosa; los umbrales de las alertas configuradas también mueven el color. Las escalas sin confirmar llevan la marca "sin confirmar".
   - **Modo tablero:** pocos valores en grande, pensado para el radio del auto. Se abre directo con `http://<ip>:3000/?tablero#live`.
+  - **Gráficas:** pestaña con un plano cartesiano por sensor numérico, en el mismo orden. Ventana configurable de 30/60/120 s, ejes con escala del sensor y traza coloreada por zona.
   - **Grabar CSV:** guarda las muestras en el dispositivo que lo pide, incluida la columna de bytes crudos.
 - **Códigos:** DTCs con su estado (presente/memorizado, MIL) y la explicación, causas y soluciones de la base de datos. Botón para abrir el reporte HTML.
   - **Borrar códigos:** solo aparece si el servidor se inició con `--pin` (o la variable `OBD_PIN`). Pide confirmación y el PIN en cada borrado, se niega si el motor está en marcha y vuelve a leer los códigos después. Tras 5 PIN incorrectos se bloquea 60 s.
