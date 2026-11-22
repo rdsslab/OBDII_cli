@@ -51,13 +51,17 @@ before(async () => {
 });
 after(() => proc?.kill());
 
-test('pages: / is the shared panel with the ESP32 entry, files are served', async () => {
+test('pages: / is the shared panel with the ESP32 entry inlined', async () => {
     const html = await (await fetch(`${ORIGIN}/`, { headers: { Cookie: cookie } })).text();
-    assert.match(html, /src\/main-esp32\.js/);
-    assert.match(html, /"@obdii\/core":".\/vendor\/core\/index.js"/);
-    const js = await fetch(`${ORIGIN}/vendor/core/speed-filter.js`);
-    assert.equal(js.status, 200);
-    assert.match(js.headers.get('content-type'), /javascript/);
+    // The ESP32 build inlines CSS/JS/SVG in one HTML to avoid lwIP requests.
+    assert.match(html, /<style>/);
+    assert.match(html, /<script type="module">/);
+    assert.doesNotMatch(html, /src="src\/main-esp32\.js"/);
+    assert.doesNotMatch(html, /href="src\/styles\.css"/);
+    // The bundle is the ESP32 entry, and carries the shared UI (including charts).
+    assert.match(html, /api\/ws\/elm/);
+    assert.match(html, /id="tab-live"/);
+    assert.match(html, /id="tab-charts"/);
     assert.equal((await fetch(`${ORIGIN}/esp32`, { redirect: 'manual' })).status, 302, 'needs login');
 });
 
