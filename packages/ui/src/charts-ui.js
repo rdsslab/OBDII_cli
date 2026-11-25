@@ -6,11 +6,10 @@
  * grabación en modo histórico. Y = escala configurable del sensor. La línea
  * se pinta por tramos con el color de la zona correspondiente.
  */
-import { meta } from './labels.js';
 import { isGraphable, sensorRank, sensorZone, sensorZones, shortLabel, sortFields } from './sensor-meta.js';
 import { isVisible, rangeFor } from './display-config.js';
 import { parseTripCsv } from './csv-chart.js';
-import { applyStatic, onLang, t } from './i18n.js';
+import { onLang, t } from './i18n.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -37,6 +36,7 @@ export function startCharts(client, {
     let needsDraw = false;
     let pending = [];
     let history = null;                     // { label, start, end, count }
+    let wasRunning = false;                 // only a start transition leaves history
 
     function colorMap() {
         const style = getComputedStyle(document.documentElement);
@@ -48,10 +48,10 @@ export function startCharts(client, {
     }
 
     function cardText(c, display) {
-        const m = meta(c.name);
         c.el.querySelector('.name').textContent = shortLabel(c.name);
         c.unit = c.rawUnit && c.rawUnit !== 'raw' ? c.rawUnit : '';
-        c.now.textContent = c.value != null ? `${fmt(c.value)} ${c.unit}`.trim() : '';
+        const now = c.el.querySelector('.now');
+        now.textContent = c.value != null ? `${fmt(c.value)} ${c.unit}`.trim() : '';
         const r = rangeFor(c.name, display);
         const spans = c.el.querySelectorAll('footer span');
         spans[0].textContent = r ? fmt(r.min) : '';
@@ -178,6 +178,21 @@ export function startCharts(client, {
         }
     }
 
+    /** Clear history and live points, returning to the live-data view. */
+    function clearView() {
+        const wasHistory = !!history;
+        history = null;
+        charts.clear();
+        grid.innerHTML = '';
+        pending = [];
+        $('chartHistory').hidden = true;
+        $('chartLive').hidden = true;
+        $('chartEmpty').hidden = false;
+        updateInfo();
+        needsDraw = true;
+        return wasHistory;
+    }
+
     function drawAll() {
         const display = getDisplayConfig();
         const config = getAlertConfig();
@@ -229,14 +244,10 @@ export function startCharts(client, {
             btn.classList.toggle('danger', running);
             btn.classList.toggle('primary', !running);
         }
-        if (running && history) {
-            history = null;
-            charts.clear();
-            grid.innerHTML = '';
-            pending = [];
-            $('chartHistory').hidden = true;
-            $('chartEmpty').hidden = false;
-        }
+        // Starting live data from another panel returns to the live view, but a
+        // later status event must not discard a history the user just loaded.
+        if (running && !wasRunning && history) clearView();
+        wasRunning = running;
         if (!running && charts.size) $('chartInfo').textContent = t('charts.stopped');
         else updateInfo();
         needsDraw = true;
@@ -252,7 +263,16 @@ export function startCharts(client, {
         needsDraw = true;
     });
 
-    $('chartToggle')?.addEventListener('click', toggleLive);
+    // History blocks live samples; leaving it must be explicit even if live was
+    // already running in the background (no new 'state' event would arrive).
+    $('chartToggle')?.addEventListener('click', () => {
+        if (history) clearView();
+        toggleLive();
+    });
+    $('chartLive')?.addEventListener('click', () => {
+        if (history) clearView();
+        if (!getState().live?.running) toggleLive();
+    });
 
     /** Load parsed samples (live fields or CSV) into the grid. */
     function showHistory(parsed, label) {
@@ -277,6 +297,7 @@ export function startCharts(client, {
         history = { label, start: parsed.start, end: parsed.end, count: parsed.count };
         for (const c of charts.values()) cardText(c, display);
         $('chartEmpty').hidden = charts.size > 0;
+        $('chartLive').hidden = false;
         updateInfo();
         needsDraw = true;
     }
@@ -311,14 +332,7 @@ export function startCharts(client, {
         } catch (err) { toast(err.message); }
     });
 
-    $('chartClear')?.addEventListener('click', () => {
-        charts.clear();
-        grid.innerHTML = '';
-        pending = [];
-        history = null;
-        $('chartEmpty').hidden = false;
-        updateInfo();
-    });
+    $('chartClear')?.addEventListener('click', () => clearView());
 
     // A visibility switch in Ajustes hides/shows the chart card immediately.
     window.addEventListener('obd:display', () => {
@@ -341,19 +355,23 @@ export function startCharts(client, {
     });
     document.querySelector('.tabs button[data-tab="charts"]')?.addEventListener('click', () => {
         refreshTrips();
-        applyStatic();
         needsDraw = true;
     });
 
     function tick() {
+        // Schedule first: a drawing error must never kill the animation loop.
+        requestAnimationFrame(tick);
         const due = needsDraw || Date.now() - lastDraw >= DRAW_MS;
-        if (due) {
+        if (!due) return;
+        try {
             if (pending.length) flush();
             if (!$('tab-charts').hidden) drawAll();     // no gasta CPU si la pestaña está oculta
-            lastDraw = Date.now();
-            needsDraw = false;
+        } catch (err) {
+            console.error('charts:', err);
+            toast(err.message);
         }
-        requestAnimationFrame(tick);
+        lastDraw = Date.now();
+        needsDraw = false;
     }
     requestAnimationFrame(tick);
     window.addEventListener('resize', () => { needsDraw = true; });

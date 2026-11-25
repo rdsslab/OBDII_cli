@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { TripRecorder, tripToCSV } from '@obdii/core';
 import { parseTripCsv, sensorColumn, splitCsvLine } from '../src/csv-chart.js';
 
 const CSV = `# Registro de viaje OBD2
@@ -33,4 +34,32 @@ test('trip CSV becomes chart samples, skipping events and using GPS when ECU is 
 test('an empty or unrelated file has no samples', () => {
     assert.equal(parseTripCsv('').count, 0);
     assert.equal(parseTripCsv('a,b\n1,2').count, 0);
+});
+
+test('a real trip CSV plots one speed series: the filtered value, not raw + shown', () => {
+    const recs = [];
+    const rec = new TripRecorder({ sink: r => recs.push(r) });
+    const t0 = 1_764_000_000_000;
+    rec.start({}, t0);
+    for (const [t, rpm] of [[t0 + 1000, 1500], [t0 + 2000, 1600]]) {
+        rec.sample({ t, fields: [
+            { name: 'Vehicle Speed (ECU)', value: 0, unit: 'km/h' },
+            { name: 'Engine RPM', value: rpm, unit: 'rpm' },
+            { name: 'Coolant Temp', value: 45, unit: '°C' },
+        ] });
+    }
+    rec.stop(t0 + 2000);
+    const parsed = parseTripCsv(tripToCSV(recs));
+    assert.equal(parsed.count, 2);
+    const first = parsed.samples[0].fields;
+    assert.equal(first.filter(f => f.name === 'Vehicle Speed (ECU)').length, 1);
+    assert.deepEqual(first.map(f => f.name).sort(), ['Coolant Temp', 'Engine RPM', 'Vehicle Speed (ECU)']);
+    assert.equal(first.find(f => f.name === 'Engine RPM').value, 1500);
+});
+
+test('the CLI CSV with relative t_ms is also readable', () => {
+    const parsed = parseTripCsv('t_ms,"Vehicle Speed (ECU) (km/h)","Engine RPM (rpm)"\n0,0,1200\n250,12,1400\n500,25,1600');
+    assert.equal(parsed.count, 3);
+    assert.equal(parsed.end - parsed.start, 500);
+    assert.equal(parsed.samples[2].fields.find(f => f.name === 'Engine RPM').value, 1600);
 });

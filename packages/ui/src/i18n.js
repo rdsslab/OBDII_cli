@@ -100,11 +100,12 @@ const DICT = {
     // charts
     'charts.window': ['Ventana', 'Window'],
     'charts.clear': ['Limpiar', 'Clear'],
+    'charts.liveMode': ['Tiempo real', 'Live data'],
     'charts.loadCsv': ['Cargar CSV', 'Load CSV'],
     'charts.fromTrip': ['Grabación guardada', 'Saved recording'],
     'charts.selectTrip': ['Elegir grabación…', 'Choose recording…'],
     'charts.empty': ['Conéctate e inicia el tiempo real para ver la evolución de los sensores.', 'Connect and start live data to see how the sensors evolve.'],
-    'charts.hint': ['Cada gráfica comparte el orden del panel de tiempo real. El color de la traza indica la zona: azul (frío), verde (normal), ámbar (cerca del máximo) y rojo (peligro).', 'Every chart follows the same order as the live panel. Line colour shows the zone: blue (cold), green (normal), amber (near maximum) and red (danger).'],
+    'charts.hint': ['«Iniciar» muestra los datos en tiempo real. «Cargar CSV» o una grabación guardada muestran el histórico; «Tiempo real» o «Limpiar» vuelven a las muestras en vivo. El color de la traza indica la zona: azul (frío), verde (normal), ámbar (cerca del máximo) y rojo (peligro).', '\"Start\" shows live data. \"Load CSV\" or a saved recording show history; \"Live data\" or \"Clear\" return to live samples. Line colour shows the zone: blue (cold), green (normal), amber (near maximum) and red (danger).'],
     'charts.hintHistory': ['Modo histórico: {name}. Se muestran todas las muestras del archivo con sus fechas reales. «Limpiar» vuelve al tiempo real.', 'History mode: {name}. All samples are shown with their real timestamps. "Clear" returns to live data.'],
     'charts.info': ['{n} s de histórico · {c} sensores', '{n} s of history · {c} sensors'],
     'charts.infoHistory': ['{c} sensores · {n} muestras', '{c} sensors · {n} samples'],
