@@ -6,12 +6,21 @@
  */
 import { AlertEngine, ALERT_DEFS, defaultAlertConfig, mergeAlertConfig } from '@obdii/core';
 import { Sounder } from './sound.js';
+import { getLang, onLang, t } from './i18n.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const ICON = { info: 'ℹ️', warning: '⚠️', critical: '🛑' };
-const SEV_TEXT = { info: 'informativa', warning: 'advertencia', critical: 'crítica' };
-const DEFAULT_SEV = { overheat: 'advertencia / crítica', lowBattery: 'advertencia / crítica' };
+const SEV_KEY = { info: 'cfg.sevInfo', warning: 'cfg.sevWarning', critical: 'cfg.sevCritical' };
+const sevText = (sev) => t(SEV_KEY[sev] || SEV_KEY.warning);
+const PARAM_EN = {
+    'Advertencia desde': 'Warning from', 'Crítica desde': 'Critical from', 'Se despeja bajo': 'Clears below',
+    'Retardo': 'Delay', 'Mínimo con motor en marcha': 'Minimum with engine running', 'Tras arrancar, esperar': 'Wait after start',
+    'Máximo': 'Maximum', 'Advertencia bajo': 'Low warning', 'Crítica bajo': 'Low critical',
+    'Avisar después de': 'Warn after', 'Ignorar códigos': 'Ignore codes', 'Frío por debajo de': 'Cold below',
+    'RPM máximas en frío': 'Max RPM when cold', 'Tras minutos en marcha': 'After minutes running',
+    'Temperatura esperada': 'Expected temperature', 'Subida máxima': 'Max rise', 'Con el motor sobre': 'With engine above',
+};
 
 function load(key, fallback) {
     try { const v = JSON.parse(localStorage.getItem(key)); return v ?? fallback; } catch { return fallback; }
@@ -25,11 +34,11 @@ export function startAlerts(client, { toast, onLog } = {}) {
     const prefs = { mode: 'voice', lang: 'es', volume: 0.8, wake: true, ...load('obd.sound', {}) };
     Object.assign(sound, { mode: prefs.mode, lang: prefs.lang, volume: prefs.volume });
     let config = mergeAlertConfig(load('obd.alerts', null));
-    const engine = new AlertEngine({ config, lang: prefs.lang });
+    const engine = new AlertEngine({ config, lang: getLang() });
 
     // ── sound unlock: any first interaction ─────────────────
     const unlock = () => {
-        if (sound.unlock()) $('soundStatus').textContent = 'Sonido activado en este dispositivo.';
+        if (sound.unlock()) $('soundStatus').textContent = t('cfg.soundUnlocked');
         window.removeEventListener('pointerdown', unlock, true);
         window.removeEventListener('keydown', unlock, true);
     };
@@ -47,7 +56,7 @@ export function startAlerts(client, { toast, onLog } = {}) {
         }
         el.className = `alert-banner ${ev.severity}`;
         el.innerHTML = `<span class="a-icon">${ICON[ev.severity]}</span><span class="a-title">${esc(ev.title)}</span>
-            <button class="btn">Entendido</button><span class="a-msg">${esc(ev.message)}</span>`;
+            <button class="btn">${esc(t('alert.ack'))}</button><span class="a-msg">${esc(ev.message)}</span>`;
         el.querySelector('button').onclick = () => { engine.acknowledge(ev.id); el.remove(); };
         clearTimeout(el._t);
         if (ev.severity === 'info') el._t = setTimeout(() => el.remove(), 15000);
@@ -64,9 +73,9 @@ export function startAlerts(client, { toast, onLog } = {}) {
     }
 
     engine.on((ev) => {
-        if (ev.type === 'clear') { hide(ev.id); onLog?.({ level: 'info', msg: `Alerta despejada: ${ev.title}`, t: Date.now() }); return; }
+        if (ev.type === 'clear') { hide(ev.id); onLog?.({ level: 'info', msg: t('log.alertClear', { t: ev.title }), t: Date.now() }); return; }
         show(ev);
-        if (ev.type === 'raise') onLog?.({ level: ev.severity === 'info' ? 'info' : 'warn', msg: `ALERTA ${SEV_TEXT[ev.severity]}: ${ev.title}. ${ev.message}`, t: Date.now() });
+        if (ev.type === 'raise') onLog?.({ level: ev.severity === 'info' ? 'info' : 'warn', msg: t('log.alert', { sev: sevText(ev.severity), t: ev.title, m: ev.message }), t: Date.now() });
         sound.alert(ev.id, ev.severity);
         if (ev.severity !== 'info' && sound.unlocked) navigator.vibrate?.(ev.severity === 'critical' ? [300, 150, 300, 150, 300] : [250, 150, 250]);
         systemNotify(ev);
@@ -113,7 +122,6 @@ export function startAlerts(client, { toast, onLog } = {}) {
     $('wakeLock').checked = prefs.wake;
     const savePrefs = () => {
         Object.assign(sound, { mode: prefs.mode, lang: prefs.lang, volume: prefs.volume });
-        engine.setLang(prefs.lang);
         save('obd.sound', prefs);
     };
     $('soundMode').onchange = (e) => { prefs.mode = e.target.value; savePrefs(); };
@@ -123,7 +131,7 @@ export function startAlerts(client, { toast, onLog } = {}) {
     $('soundTest').onclick = async () => {
         sound.unlock();
         const how = await sound.alert('test', 'warning');
-        $('soundStatus').textContent = { voice: 'Se reprodujo la voz grabada.', tts: 'No se pudo cargar el audio grabado; se usó la voz del navegador.', beep: 'Solo pitidos (sin voz disponible o modo «Solo pitidos»).', off: 'El sonido está en silencio.' }[how];
+        $('soundStatus').textContent = t({ voice: 'cfg.soundTestVoice', tts: 'cfg.soundTestTts', beep: 'cfg.soundTestBeep', off: 'cfg.soundTestOff' }[how]);
     };
     const updateNotifyBtn = () => {
         const n = typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
@@ -135,18 +143,20 @@ export function startAlerts(client, { toast, onLog } = {}) {
 
     // ── settings: alert list ────────────────────────────────
     function renderAlertList() {
+        const lang = getLang();
         $('alertList').innerHTML = ALERT_DEFS.map(d => {
             const c = config[d.id];
-            const sev = DEFAULT_SEV[d.id] || SEV_TEXT[d.severity] || 'advertencia';
+            const sev = ['overheat', 'lowBattery'].includes(d.id) ? t('cfg.sevOverheat') : sevText(d.severity);
             const params = d.params.map(p => {
                 const input = typeof p.value === 'number'
                     ? `<input type="number" data-alert="${d.id}" data-key="${p.key}" value="${esc(c[p.key])}" min="${p.min}" max="${p.max}" step="${p.step}">`
                     : `<input type="text" data-alert="${d.id}" data-key="${p.key}" value="${esc(c[p.key])}">`;
-                return `<label>${esc(p.label)}${p.unit ? ` (${esc(p.unit)})` : ''}${input}</label>`;
+                const label = lang === 'en' ? PARAM_EN[p.label] || p.label : p.label;
+                return `<label>${esc(label)}${p.unit ? ` (${esc(p.unit)})` : ''}${input}</label>`;
             }).join('');
             return `<div class="alert-item${c.enabled ? '' : ' off'}" data-id="${d.id}">
-                <header><label><input type="checkbox" data-alert="${d.id}" data-key="enabled" ${c.enabled ? 'checked' : ''}>${esc(d.title.es)}</label>
-                <span class="sev">${esc(sev)}</span><button class="btn ghost" data-test="${d.id}">Probar</button></header>
+                <header><label><input type="checkbox" data-alert="${d.id}" data-key="enabled" ${c.enabled ? 'checked' : ''}>${esc(d.title[lang] || d.title.es)}</label>
+                <span class="sev">${esc(sev)}</span><button class="btn ghost" data-test="${d.id}">${esc(t('cfg.test'))}</button></header>
                 ${params ? `<div class="params">${params}</div>` : ''}
             </div>`;
         }).join('');
@@ -176,8 +186,9 @@ export function startAlerts(client, { toast, onLog } = {}) {
         engine.setConfig(config);
         save('obd.alerts', config);
         renderAlertList();
-        toast?.('Umbrales restaurados');
+        toast?.(t('cfg.resetDone'));
     };
+    onLang(() => { engine.setLang(getLang()); renderAlertList(); updateNotifyBtn(); });
     renderAlertList();
 
     return {

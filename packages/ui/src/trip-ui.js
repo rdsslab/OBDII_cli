@@ -8,6 +8,7 @@
  */
 import { TripRecorder, attachTripRecorder, tripToCSV, tripIdFor } from '@obdii/core';
 import { IdbTripStore } from './trip-store.js';
+import { getLang, onLang, t } from './i18n.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -75,7 +76,7 @@ export class LocalTrips {
     get status() { return { ...this.recorder.status(), id: this.id }; }
 
     async start({ rate, gps, coords, meta }) {
-        if (this.recorder.recording) throw new Error('Ya hay una grabación en curso');
+        if (this.recorder.recording) throw new Error(t('rec.already'));
         this.recorder.rate = rate === '1s' ? '1s' : 'all';
         this.recorder.includeCoords = !!(gps && coords);
         this.id = tripIdFor();
@@ -87,10 +88,10 @@ export class LocalTrips {
             // phones report transient errors and timeouts repeatedly.
             let lastFix = Date.now();
             let outage = false;
-            const GPS_ERR = { 1: 'permiso de ubicación denegado', 2: 'sin señal', 3: 'sin señal (tiempo agotado)' };
+            const GPS_ERR = { 1: t('rec.gpsDenied'), 2: t('rec.gpsNoSignal'), 3: t('rec.gpsTimeout') };
             this.watchId = navigator.geolocation.watchPosition(
                 (pos) => {
-                    if (outage) this.recorder.event('gps', 'GPS recuperado');
+                    if (outage) this.recorder.event('gps', t('rec.gpsRecovered'));
                     outage = false;
                     lastFix = Date.now();
                     this.recorder.gps(pos);
@@ -98,7 +99,7 @@ export class LocalTrips {
                 (err) => {
                     if (!outage && (err.code === 1 || Date.now() - lastFix > 10_000)) {
                         outage = true;
-                        this.recorder.event('gps', `GPS ${GPS_ERR[err.code] || 'no disponible'}`, 'warning');
+                        this.recorder.event('gps', t('rec.gpsProblem', { msg: GPS_ERR[err.code] || t('rec.gpsNoSignal') }), 'warning');
                     }
                     if (err.code === 1) this._stopGps();
                 },
@@ -180,27 +181,34 @@ export function startTrips(client, { toast, onLog, getState, alerts } = {}) {
     $('tripCoords').onchange = (e) => { prefs.coords = e.target.checked; savePrefs(); };
 
     $('tripGpsRow').hidden = !backend.gps;
-    $('tripWhere').textContent = server
-        ? 'Graba el servidor en la carpeta logs/ del portátil, aunque cierres el navegador. Cualquier dispositivo de la red puede iniciarla, detenerla y descargarla. No incluye GPS (los navegadores solo dan la ubicación por HTTPS).'
-        : `Graba este dispositivo en el almacenamiento del navegador; se guarda cada ${FLUSH_MS / 1000} s, así que sobrevive a un cierre inesperado. Mantén la app abierta y en primer plano: si el teléfono la suspende, la lectura del ELM327 se detiene.${backend.gps ? '' : ' El GPS solo está disponible en la PWA publicada (HTTPS).'}`;
+    const tripWhere = () => {
+        $('tripWhere').textContent = server ? t('rec.whereServer')
+            : t('rec.whereLocal', { s: FLUSH_MS / 1000 }) + (backend.gps ? '' : t('rec.whereNoGps'));
+    };
+    tripWhere();
 
     let tick = null;
     function render(st = backend.status) {
         const rec = !!st?.recording;
-        const t = $('tripToggle');
-        t.textContent = rec ? 'Detener grabación' : 'Iniciar grabación';
-        t.classList.toggle('danger', rec);
-        t.classList.toggle('primary', !rec);
+        const btn = $('tripToggle');
+        btn.textContent = t(rec ? 'rec.stop' : 'rec.start');
+        btn.classList.toggle('danger', rec);
+        btn.classList.toggle('primary', !rec);
         $('tripRate').disabled = rec;
         $('tripGps').disabled = rec;
         $('tripCoords').disabled = rec || !prefs.gps;
         const dur = rec && st.startedAt ? (Date.now() - st.startedAt) / 1000 : 0;
-        $('tripStatus').innerHTML = rec
-            ? `<span class="rec-dot"></span>Grabando · ${esc(fmtDuration(dur))} · ${st.samples ?? 0} muestras${backend.gps && prefs.gps ? ` · ${st.gpsSamples ?? 0} con GPS` : ''} · ${st.events ?? 0} eventos${st.speedSpikes ? ` · ⚠ ${st.speedSpikes} picos de velocidad` : ''}`
-            : 'Sin grabación en curso.';
+        $('tripStatus').textContent = rec
+            ? `${t('rec.active', {
+                dur: fmtDuration(dur), n: st.samples ?? 0,
+                gps: backend.gps && prefs.gps ? t('rec.gpsCount', { n: st.gpsSamples ?? 0 }) : '',
+                ev: t('rec.events', { n: st.events ?? 0 }),
+                spikes: st.speedSpikes ? t('rec.spikes', { n: st.speedSpikes }) : '',
+            })}` : t('rec.idle');
+        if (rec) $('tripStatus').insertAdjacentHTML('afterbegin', '<span class="rec-dot"></span>');
         const lr = $('liveRec');
         lr.classList.toggle('rec', rec);
-        lr.textContent = rec ? `● Grabando (${st.samples ?? 0})` : 'Grabar';
+        lr.textContent = rec ? t('live.recording', { n: st.samples ?? 0 }) : t('live.record');
         clearInterval(tick);
         if (rec) tick = setInterval(() => render(backend.status), 1000);
         alerts?.setAwake?.('trip', () => !!backend.status?.recording);
@@ -212,16 +220,16 @@ export function startTrips(client, { toast, onLog, getState, alerts } = {}) {
         try {
             if (st?.recording) {
                 const r = await backend.stop();
-                toast?.(r ? `Grabación guardada: ${r.samples} muestras, ${fmtDuration(r.durationS)}` : 'Grabación detenida');
-                if (!server) onLog?.({ level: 'info', msg: `Grabación detenida: ${r?.id} (${r?.samples} muestras)`, t: Date.now() });
+                toast?.(r ? t('rec.saved', { n: r.samples, dur: fmtDuration(r.durationS) }) : t('rec.stopped'));
+                if (!server) onLog?.({ level: 'info', msg: t('rec.logStop', { id: r?.id, n: r?.samples ?? 0 }), t: Date.now() });
             } else {
                 const s = getState?.() || {};
                 await backend.start({ rate: prefs.rate, gps: prefs.gps, coords: prefs.coords, meta: { perfil: s.profile || '—', adaptador: s.version || '—' } });
-                if (!server) onLog?.({ level: 'info', msg: `Grabación iniciada: ${backend.status.id}`, t: Date.now() });
+                if (!server) onLog?.({ level: 'info', msg: t('rec.logStart', { id: backend.status.id }), t: Date.now() });
                 if (s.status === 'connected' && !s.live?.running) {
                     try { await client.startLive(); } catch (err) { toast?.(err.message); }
                 } else if (s.status !== 'connected' && s.status !== 'watch') {
-                    toast?.('Grabando. Los sensores se registran cuando haya conexión y tiempo real.');
+                    toast?.(t('rec.started'));
                 }
             }
         } catch (err) { toast?.(err.message); }
@@ -235,21 +243,23 @@ export function startTrips(client, { toast, onLog, getState, alerts } = {}) {
         let list = [];
         try { list = await backend.list(); } catch (err) { $('tripList').innerHTML = `<p class="error">${esc(err.message)}</p>`; return; }
         const cur = backend.status?.id;
-        $('tripList').innerHTML = list.length ? list.map(t => {
-            const live = t.id === cur && backend.status?.recording;
-            const when = t.startedAt ? new Date(t.startedAt).toLocaleString() : t.id;
-            const parts = [fmtDuration(t.durationS), t.samples != null ? `${t.samples} muestras` : null,
-                t.gpsSamples ? `${t.gpsSamples} con GPS` : null, t.speedSpikes ? `⚠ ${t.speedSpikes} picos de velocidad` : null,
-                t.rate === '1s' ? '1/s' : null, fmtBytes(t.bytes)].filter(Boolean);
-            const badge = live ? '<span class="tag bad">grabando</span>' : t.complete === false ? '<span class="tag">interrumpida</span>' : '';
-            return `<div class="trip-item" data-id="${esc(t.id)}">
+        const en = getLang() === 'en';
+        $('tripList').innerHTML = list.length ? list.map(trip => {
+            const live = trip.id === cur && backend.status?.recording;
+            const when = trip.startedAt ? new Date(trip.startedAt).toLocaleString() : trip.id;
+            const parts = [fmtDuration(trip.durationS), trip.samples != null ? `${trip.samples} ${en ? 'samples' : 'muestras'}` : null,
+                trip.gpsSamples ? `${trip.gpsSamples} ${en ? 'with GPS' : 'con GPS'}` : null,
+                trip.speedSpikes ? `⚠ ${trip.speedSpikes} ${en ? 'speed spikes' : 'picos de velocidad'}` : null,
+                trip.rate === '1s' ? '1/s' : null, fmtBytes(trip.bytes)].filter(Boolean);
+            const badge = live ? `<span class="tag bad">${esc(t('rec.recordingTag'))}</span>` : trip.complete === false ? `<span class="tag">${esc(t('rec.interrupted'))}</span>` : '';
+            return `<div class="trip-item" data-id="${esc(trip.id)}">
                 <div class="trip-info"><strong>${esc(when)}</strong> ${badge}<small>${esc(parts.join(' · '))}</small></div>
-                <button class="btn" data-dl="${esc(t.id)}">CSV</button>
-                <button class="btn ghost danger-text" data-del="${esc(t.id)}" ${live ? 'disabled' : ''} aria-label="Borrar">Borrar</button>
+                <button class="btn" data-dl="${esc(trip.id)}">CSV</button>
+                <button class="btn ghost danger-text" data-del="${esc(trip.id)}" ${live ? 'disabled' : ''} aria-label="${esc(t('rec.delete'))}">${esc(t('rec.delete'))}</button>
             </div>`;
-        }).join('') : '<p class="empty">Todavía no hay grabaciones.</p>';
+        }).join('') : `<p class="empty">${esc(t('rec.empty'))}</p>`;
         const u = await backend.usage();
-        $('tripUsage').textContent = u ? `Espacio usado por esta app: ${fmtBytes(u.used)} de ${fmtBytes(u.quota)} disponibles.` : '';
+        $('tripUsage').textContent = u ? t('rec.storage', { used: fmtBytes(u.used), quota: fmtBytes(u.quota) }) : '';
     }
     $('tripRefresh').onclick = refresh;
     $('tripList').addEventListener('click', async (e) => {
@@ -257,19 +267,20 @@ export function startTrips(client, { toast, onLog, getState, alerts } = {}) {
         try {
             if (dl) await backend.download(dl);
             if (del) {
-                if (!confirm('¿Borrar esta grabación? No se puede deshacer.')) return;
+                if (!confirm(t('rec.confirmDelete'))) return;
                 let pin;
                 if (server && getState?.().clearEnabled) {
-                    pin = prompt('PIN del servidor');
+                    pin = prompt(t('rec.pinPrompt'));
                     if (pin == null) return;
                 }
                 await backend.remove(del, pin);
-                toast?.('Grabación borrada');
+                toast?.(t('rec.deleted'));
                 refresh();
             }
         } catch (err) { toast?.(err.message); }
     });
 
+    onLang(() => { tripWhere(); render(); refresh(); });
     render();
     refresh();
     return { backend, refresh };

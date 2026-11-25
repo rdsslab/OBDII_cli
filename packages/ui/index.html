@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#0f1720">
-  <title>OBD2 Diagnóstico</title>
+  <title data-i18n="app.title">OBD2 Diagnóstico</title>
   <link rel="icon" href="src/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="src/styles.css">
 </head>
@@ -16,9 +16,9 @@
       <span>OBD2</span>
     </div>
     <div class="status">
-      <span id="pill" class="pill" data-status="disconnected">Desconectado</span>
+      <span id="pill" class="pill" data-status="disconnected" data-i18n="status.disconnected">Desconectado</span>
       <span id="volt" class="chip" hidden></span>
-      <span id="viewers" class="chip" title="Dispositivos conectados" hidden></span>
+      <span id="viewers" class="chip" data-i18n-title="tip.devices" title="Dispositivos conectados" hidden></span>
     </div>
   </header>
 
@@ -26,81 +26,82 @@
 
   <nav class="tabs" role="tablist">
     <button role="tab" data-tab="conn" aria-selected="true">
-      <svg viewBox="0 0 24 24"><path d="M7 7l10 10-5 5V2l5 5L7 17" /></svg><span>Conexión</span></button>
+      <svg viewBox="0 0 24 24"><path d="M7 7l10 10-5 5V2l5 5L7 17" /></svg><span data-i18n="tab.conn">Conexión</span></button>
     <button role="tab" data-tab="live">
-      <svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg><span>Tiempo real</span></button>
+      <svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg><span data-i18n="tab.live">Tiempo real</span></button>
     <button role="tab" data-tab="charts">
-      <svg viewBox="0 0 24 24"><path d="M3 3v18h18M7 15l4-5 3 3 5-7" /></svg><span>Gráficas</span></button>
+      <svg viewBox="0 0 24 24"><path d="M3 3v18h18M7 15l4-5 3 3 5-7" /></svg><span data-i18n="tab.charts">Gráficas</span></button>
     <button role="tab" data-tab="dtc">
-      <svg viewBox="0 0 24 24"><path d="M12 3l10 18H2z" /><path d="M12 10v4M12 17.5v.5" /></svg><span>Códigos</span></button>
+      <svg viewBox="0 0 24 24"><path d="M12 3l10 18H2z" /><path d="M12 10v4M12 17.5v.5" /></svg><span data-i18n="tab.dtc">Códigos</span></button>
     <button role="tab" data-tab="ecu">
-      <svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2" /><path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4" /></svg><span>ECU</span></button>
+      <svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2" /><path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4" /></svg><span data-i18n="tab.ecu">ECU</span></button>
     <button role="tab" data-tab="rec">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3.5" /></svg><span>Grabar</span></button>
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3.5" /></svg><span data-i18n="tab.rec">Grabar</span></button>
     <button role="tab" data-tab="cfg">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg><span>Ajustes</span></button>
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg><span data-i18n="tab.cfg">Ajustes</span></button>
     <button role="tab" data-tab="log">
-      <svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5" /></svg><span>Registro</span></button>
+      <svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5" /></svg><span data-i18n="tab.log">Registro</span></button>
   </nav>
 
   <main>
     <!-- Conexión -->
     <section id="tab-conn" class="panel" role="tabpanel">
       <div class="card">
-        <h2>Adaptador ELM327</h2>
-        <label class="field">Puerto
+        <h2 data-i18n="conn.adapter">Adaptador ELM327</h2>
+        <label class="field"><span data-i18n="conn.port">Puerto</span>
           <div class="row">
             <select id="port"></select>
-            <button id="refreshPorts" class="btn ghost" title="Actualizar puertos" aria-label="Actualizar puertos">
+            <button id="refreshPorts" class="btn ghost" data-i18n-title="conn.refreshPorts" data-i18n-aria="conn.refreshPorts" title="Actualizar puertos" aria-label="Actualizar puertos">
               <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" /></svg></button>
           </div>
         </label>
         <p id="portHint" class="hint"></p>
-        <p id="esp32Hint" class="hint" hidden>Buscar o cambiar el adaptador, claves y red Wi-Fi: <a href="/esp32">Ajustes del ESP32</a>.</p>
-        <p id="unsupported" class="error" hidden>Este navegador no soporta Web Serial. Abre esta página en Chrome o Edge (en Android, Chrome actualizado) y empareja antes el ELM327 en los ajustes de Bluetooth.</p>
-        <label class="field">Perfil de ECU
+        <p id="esp32Hint" class="hint" hidden><span data-i18n="conn.esp32">Buscar o cambiar el adaptador, claves y red Wi-Fi:</span> <a href="/esp32" data-i18n="conn.esp32Link">Ajustes del ESP32</a>.</p>
+        <p id="unsupported" class="error" hidden data-i18n="conn.unsupported">Este navegador no soporta Web Serial. Abre esta página en Chrome o Edge (en Android, Chrome actualizado) y empareja antes el ELM327 en los ajustes de Bluetooth.</p>
+        <label class="field"><span data-i18n="conn.profile">Perfil de ECU</span>
           <select id="profile"></select>
         </label>
         <div class="row actions">
-          <button id="connect" class="btn primary">Conectar</button>
-          <button id="disconnect" class="btn" disabled>Desconectar</button>
+          <button id="connect" class="btn primary" data-i18n="conn.connect">Conectar</button>
+          <button id="disconnect" class="btn" disabled data-i18n="conn.disconnect">Desconectar</button>
         </div>
-        <button id="watchBattery" class="btn ghost wide">Vigilar batería (contacto apagado)</button>
-        <p class="hint">Vigilar batería mide solo el voltaje con el ELM327 cada 30 s, sin hablar con la ECU, y avisa si baja del umbral. El ELM327 conectado también consume batería.</p>
+        <button id="watchBattery" class="btn ghost wide" data-i18n="conn.watchBattery">Vigilar batería (contacto apagado)</button>
+        <p class="hint" data-i18n="conn.watchHint">Vigilar batería mide solo el voltaje con el ELM327 cada 30 s, sin hablar con la ECU, y avisa si baja del umbral. El ELM327 conectado también consume batería.</p>
         <p id="connError" class="error" hidden></p>
       </div>
       <div class="card">
-        <h2>Sesión</h2>
+        <h2 data-i18n="conn.session">Sesión</h2>
         <dl class="kv">
-          <dt>Estado</dt><dd id="sStatus">—</dd>
-          <dt>Puerto</dt><dd id="sPort">—</dd>
-          <dt>Adaptador</dt><dd id="sVersion">—</dd>
-          <dt>Protocolo</dt><dd id="sMode">—</dd>
-          <dt>Perfil</dt><dd id="sProfile">—</dd>
-          <dt>Batería (ATRV)</dt><dd id="sVolt">—</dd>
+          <dt data-i18n="conn.state">Estado</dt><dd id="sStatus">—</dd>
+          <dt data-i18n="conn.port">Puerto</dt><dd id="sPort">—</dd>
+          <dt data-i18n="conn.adapter2">Adaptador</dt><dd id="sVersion">—</dd>
+          <dt data-i18n="conn.protocol">Protocolo</dt><dd id="sMode">—</dd>
+          <dt data-i18n="conn.profile2">Perfil</dt><dd id="sProfile">—</dd>
+          <dt data-i18n="conn.battery">Batería (ATRV)</dt><dd id="sVolt">—</dd>
         </dl>
-        <p id="sessionHint" class="hint">Pon el contacto en ON antes de conectar.</p>
+        <p id="sessionHint" class="hint" data-i18n="conn.sessionDirect">Pon el contacto en ON antes de conectar.</p>
       </div>
     </section>
 
     <!-- Tiempo real -->
     <section id="tab-live" class="panel" role="tabpanel" hidden>
       <div class="toolbar">
-        <button id="liveToggle" class="btn primary">Iniciar</button>
+        <button id="liveToggle" class="btn primary" data-i18n="live.start">Iniciar</button>
         <span id="liveInfo" class="muted"></span>
         <span class="spacer"></span>
-        <label class="switch"><input type="checkbox" id="dashMode"><span>Tablero</span></label>
-        <button id="liveRec" class="btn ghost" title="Grabar todos los datos (pestaña Grabar)">Grabar</button>
+        <label class="switch"><input type="checkbox" id="dashMode"><span data-i18n="live.dash">Tablero</span></label>
+        <button id="liveRec" class="btn ghost" data-i18n="live.record">Grabar</button>
       </div>
       <div id="liveGrid" class="grid"></div>
-      <p id="liveEmpty" class="empty">Conéctate e inicia el tiempo real para ver los sensores.</p>
-      <details class="raw"><summary>Bytes crudos</summary><code id="liveRaw"></code></details>
+      <p id="liveEmpty" class="empty" data-i18n="live.empty">Conéctate e inicia el tiempo real para ver los sensores.</p>
+      <details class="raw"><summary data-i18n="live.raw">Bytes crudos</summary><code id="liveRaw"></code></details>
     </section>
 
-    <!-- Gráficas: mismo orden de sensores, plano cartesiano en tiempo real -->
+    <!-- Gráficas: mismo orden de sensores, plano cartesiano en tiempo real e histórico -->
     <section id="tab-charts" class="panel" role="tabpanel" hidden>
-      <div class="toolbar">
-        <label class="field" style="margin:0">Ventana
+      <div class="toolbar wrap">
+        <button id="chartToggle" class="btn primary" data-i18n="live.start">Iniciar</button>
+        <label class="field" style="margin:0"><span data-i18n="charts.window">Ventana</span>
           <select id="chartWindow" style="width:auto">
             <option value="30">30 s</option>
             <option value="60" selected>60 s</option>
@@ -109,21 +110,24 @@
         </label>
         <span id="chartInfo" class="muted">60 s de histórico · 0 sensores</span>
         <span class="spacer"></span>
-        <button id="chartClear" class="btn ghost">Limpiar</button>
+        <label class="btn ghost file-btn"><span data-i18n="charts.loadCsv">Cargar CSV</span><input id="chartFile" type="file" accept=".csv,text/csv" hidden></label>
+        <select id="chartTrip" data-i18n-aria="charts.fromTrip" aria-label="Grabación guardada" style="width:auto"><option value="" data-i18n="charts.selectTrip">Elegir grabación…</option></select>
+        <button id="chartClear" class="btn ghost" data-i18n="charts.clear">Limpiar</button>
       </div>
+      <p id="chartHistory" class="hint" hidden></p>
       <div id="chartGrid" class="chart-grid"></div>
-      <p id="chartEmpty" class="empty">Conéctate e inicia el tiempo real para ver la evolución de los sensores.</p>
-      <p class="hint">Cada gráfica comparte el orden del panel de tiempo real. El color de la traza indica la zona: azul (frío), verde (normal), ámbar (cerca del máximo) y rojo (peligro).</p>
+      <p id="chartEmpty" class="empty" data-i18n="charts.empty">Conéctate e inicia el tiempo real para ver la evolución de los sensores.</p>
+      <p class="hint" data-i18n="charts.hint">Cada gráfica comparte el orden del panel de tiempo real. El color de la traza indica la zona: azul (frío), verde (normal), ámbar (cerca del máximo) y rojo (peligro).</p>
     </section>
 
     <!-- Códigos -->
     <section id="tab-dtc" class="panel" role="tabpanel" hidden>
       <div class="toolbar">
-        <button id="readDtc" class="btn primary">Leer códigos</button>
+        <button id="readDtc" class="btn primary" data-i18n="dtc.read">Leer códigos</button>
         <span id="dtcInfo" class="muted"></span>
         <span class="spacer"></span>
-        <a id="report" class="btn ghost" target="_blank" rel="noopener" hidden>Reporte HTML</a>
-        <button id="clearDtc" class="btn ghost danger-text" hidden>Borrar códigos</button>
+        <a id="report" class="btn ghost" target="_blank" rel="noopener" hidden data-i18n="dtc.report">Reporte HTML</a>
+        <button id="clearDtc" class="btn ghost danger-text" hidden data-i18n="dtc.clear">Borrar códigos</button>
       </div>
       <div id="dtcList"></div>
       <p id="clearHint" class="hint"></p>
@@ -132,7 +136,7 @@
     <!-- ECU -->
     <section id="tab-ecu" class="panel" role="tabpanel" hidden>
       <div class="toolbar">
-        <button id="readEcu" class="btn primary">Leer identificación</button>
+        <button id="readEcu" class="btn primary" data-i18n="ecu.read">Leer identificación</button>
         <span id="ecuInfo" class="muted"></span>
       </div>
       <div class="card"><dl id="ecuList" class="kv wide"></dl></div>
@@ -141,31 +145,31 @@
     <!-- Grabar: registro de viaje -->
     <section id="tab-rec" class="panel" role="tabpanel" hidden>
       <div class="card">
-        <h2>Grabación de datos</h2>
-        <p class="hint">Guarda todos los sensores, el bloque crudo de la ECU, las alertas, los códigos y los cortes de comunicación, y el GPS si está disponible. Después descargas cada grabación como CSV.</p>
-        <p id="tripUnsupported" class="error" hidden>Este navegador no permite guardar datos localmente.</p>
+        <h2 data-i18n="rec.title">Grabación de datos</h2>
+        <p class="hint" data-i18n="rec.hint">Guarda todos los sensores, el bloque crudo de la ECU, las alertas, los códigos y los cortes de comunicación, y el GPS si está disponible. Después descargas cada grabación como CSV.</p>
+        <p id="tripUnsupported" class="error" hidden data-i18n="rec.unsupported">Este navegador no permite guardar datos localmente.</p>
         <div class="settings-grid">
-          <label class="field">Muestreo
+          <label class="field"><span data-i18n="rec.rate">Muestreo</span>
             <select id="tripRate">
-              <option value="all">Todas las muestras</option>
-              <option value="1s">1 muestra por segundo</option>
+              <option value="all" data-i18n="rec.rateAll">Todas las muestras</option>
+              <option value="1s" data-i18n="rec.rate1s">1 muestra por segundo</option>
             </select>
           </label>
         </div>
         <div id="tripGpsRow" class="row wrap" hidden>
-          <label class="switch"><input type="checkbox" id="tripGps"><span>Incluir GPS (velocidad, rumbo, altitud)</span></label>
-          <label class="switch"><input type="checkbox" id="tripCoords"><span>Incluir coordenadas</span></label>
+          <label class="switch"><input type="checkbox" id="tripGps"><span data-i18n="rec.gps">Incluir GPS (velocidad, rumbo, altitud)</span></label>
+          <label class="switch"><input type="checkbox" id="tripCoords"><span data-i18n="rec.coords">Incluir coordenadas</span></label>
         </div>
         <div class="row wrap actions">
-          <button id="tripToggle" class="btn primary">Iniciar grabación</button>
-          <span id="tripStatus" class="muted">Sin grabación en curso.</span>
+          <button id="tripToggle" class="btn primary" data-i18n="rec.start">Iniciar grabación</button>
+          <span id="tripStatus" class="muted" data-i18n="rec.idle">Sin grabación en curso.</span>
         </div>
         <p id="tripWhere" class="hint"></p>
       </div>
       <div class="card">
         <div class="row between">
-          <h2>Grabaciones</h2>
-          <button id="tripRefresh" class="btn ghost">Actualizar</button>
+          <h2 data-i18n="rec.list">Grabaciones</h2>
+          <button id="tripRefresh" class="btn ghost" data-i18n="rec.refresh">Actualizar</button>
         </div>
         <div id="tripList" class="trip-list"></div>
         <p id="tripUsage" class="hint"></p>
@@ -175,58 +179,73 @@
     <!-- Ajustes: sonido, alertas, calibración -->
     <section id="tab-cfg" class="panel" role="tabpanel" hidden>
       <div class="card">
-        <h2>Sonido y avisos</h2>
+        <h2 data-i18n="cfg.sound">Sonido y avisos</h2>
         <div class="settings-grid">
-          <label class="field">Sonido de las alertas
+          <label class="field"><span data-i18n="cfg.soundMode">Sonido de las alertas</span>
             <select id="soundMode">
-              <option value="voice">Pitidos + voz</option>
-              <option value="beep">Solo pitidos</option>
-              <option value="off">Silencio</option>
+              <option value="voice" data-i18n="cfg.soundVoice">Pitidos + voz</option>
+              <option value="beep" data-i18n="cfg.soundBeep">Solo pitidos</option>
+              <option value="off" data-i18n="cfg.soundOff">Silencio</option>
             </select>
           </label>
-          <label class="field">Idioma de la voz
+          <label class="field"><span data-i18n="cfg.voiceLang">Idioma de la voz</span>
             <select id="soundLang">
-              <option value="es">Español</option>
-              <option value="en">English</option>
+              <option value="es" data-i18n="cfg.spanish">Español</option>
+              <option value="en" data-i18n="cfg.english">English</option>
             </select>
           </label>
-          <label class="field">Volumen
+          <label class="field"><span data-i18n="cfg.uiLang">Idioma de la interfaz</span>
+            <select id="uiLang">
+              <option value="es" data-i18n="cfg.spanish">Español</option>
+              <option value="en" data-i18n="cfg.english">English</option>
+            </select>
+          </label>
+          <label class="field"><span data-i18n="cfg.volume">Volumen</span>
             <input id="soundVol" type="range" min="0" max="1" step="0.05">
           </label>
         </div>
         <div class="row wrap">
-          <button id="soundTest" class="btn">Probar sonido</button>
-          <button id="notifyPerm" class="btn ghost">Permitir notificaciones</button>
-          <label class="switch"><input type="checkbox" id="wakeLock"><span>Mantener la pantalla encendida durante el tiempo real</span></label>
+          <button id="soundTest" class="btn" data-i18n="cfg.soundTest">Probar sonido</button>
+          <button id="notifyPerm" class="btn ghost" data-i18n="cfg.notify">Permitir notificaciones</button>
+          <label class="switch"><input type="checkbox" id="wakeLock"><span data-i18n="cfg.wake">Mantener la pantalla encendida durante el tiempo real</span></label>
         </div>
-        <p id="soundStatus" class="hint">El navegador solo permite sonido después de tocar la página: cualquier toque lo activa.</p>
+        <p id="soundStatus" class="hint" data-i18n="cfg.soundHint">El navegador solo permite sonido después de tocar la página: cualquier toque lo activa.</p>
       </div>
 
       <div class="card">
         <div class="row between">
-          <h2>Alertas</h2>
-          <button id="alertsReset" class="btn ghost">Restaurar valores</button>
+          <h2 data-i18n="cfg.alerts">Alertas</h2>
+          <button id="alertsReset" class="btn ghost" data-i18n="cfg.alertsReset">Restaurar valores</button>
         </div>
-        <p class="hint">Cada dispositivo guarda sus propios umbrales. Las alertas se evalúan con cada lectura en tiempo real.</p>
+        <p class="hint" data-i18n="cfg.alertsHint">Cada dispositivo guarda sus propios umbrales. Las alertas se evalúan con cada lectura en tiempo real.</p>
         <div id="alertList" class="alert-list"></div>
       </div>
 
       <div class="card">
-        <h2>Calibración de velocidad (GPS)</h2>
-        <p class="hint">Compara la velocidad de la ECU con la del GPS del teléfono mientras conduces y genera un archivo para ajustar la escala. Necesita la PWA (HTTPS), el tiempo real activo y permiso de ubicación. Conduce a velocidades variadas y estables; la pantalla se mantiene encendida.</p>
-        <p id="calUnsupported" class="error" hidden>La ubicación GPS solo está disponible en la PWA publicada (HTTPS) o en localhost. Desde el servidor de la red local no funciona.</p>
+        <div class="row between">
+          <h2 data-i18n="cfg.sensors">Sensores visibles y escalas</h2>
+          <button id="sensorsReset" class="btn ghost" data-i18n="cfg.sensorsReset">Restaurar sensores</button>
+        </div>
+        <p class="hint" data-i18n="cfg.sensorsHint">Elige qué sensores aparecen en Tiempo real y Gráficas y ajusta la escala y las zonas de color a tu vehículo. Velocidad por defecto: 0–150 km/h. Los umbrales de Alertas también influyen en el color.</p>
+        <div id="sensorList" class="sensor-list"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="cfg.calTitle">Calibración de velocidad (GPS)</h2>
+        <p class="hint" data-i18n="cfg.calHint">Compara la velocidad de la ECU con la del GPS del teléfono mientras conduces y genera un archivo para ajustar la escala. Necesita la PWA (HTTPS), el tiempo real activo y permiso de ubicación. Conduce a velocidades variadas y estables; la pantalla se mantiene encendida.</p>
+        <p id="calUnsupported" class="error" hidden data-i18n="cfg.calUnsupported">La ubicación GPS solo está disponible en la PWA publicada (HTTPS) o en localhost. Desde el servidor de la red local no funciona.</p>
         <div class="row wrap">
-          <button id="calStart" class="btn primary">Iniciar calibración</button>
-          <button id="calDownload" class="btn" disabled>Descargar CSV</button>
-          <label class="switch"><input type="checkbox" id="calCoords"><span>Incluir coordenadas en el archivo</span></label>
+          <button id="calStart" class="btn primary" data-i18n="cfg.calStart">Iniciar calibración</button>
+          <button id="calDownload" class="btn" disabled data-i18n="cfg.calDownload">Descargar CSV</button>
+          <label class="switch"><input type="checkbox" id="calCoords"><span data-i18n="cfg.calCoords">Incluir coordenadas en el archivo</span></label>
         </div>
         <dl class="kv cal-readout">
-          <dt>GPS</dt><dd id="calGps">—</dd>
-          <dt>ECU</dt><dd id="calEcu">—</dd>
-          <dt>Proporción GPS / ECU</dt><dd id="calRatio">—</dd>
-          <dt>Precisión GPS</dt><dd id="calAcc">—</dd>
-          <dt>Puntos</dt><dd id="calCount">—</dd>
-          <dt>Ajuste actual</dt><dd id="calFit">—</dd>
+          <dt data-i18n="cfg.calGps">GPS</dt><dd id="calGps">—</dd>
+          <dt data-i18n="cfg.calEcu">ECU</dt><dd id="calEcu">—</dd>
+          <dt data-i18n="cfg.calRatio">Proporción GPS / ECU</dt><dd id="calRatio">—</dd>
+          <dt data-i18n="cfg.calAcc">Precisión GPS</dt><dd id="calAcc">—</dd>
+          <dt data-i18n="cfg.calPoints">Puntos</dt><dd id="calCount">—</dd>
+          <dt data-i18n="cfg.calFit">Ajuste actual</dt><dd id="calFit">—</dd>
         </dl>
       </div>
     </section>
@@ -239,20 +258,20 @@
 
   <dialog id="clearDialog">
     <form method="dialog" id="clearForm">
-      <h2>Borrar códigos de error</h2>
-      <p>Se enviará a la ECU la orden de borrar <strong>todos</strong> los códigos memorizados.</p>
+      <h2 data-i18n="dtc.dlgTitle">Borrar códigos de error</h2>
+      <p data-i18n="dtc.dlgText">Se enviará a la ECU la orden de borrar <strong>todos</strong> los códigos memorizados.</p>
       <ul>
-        <li>Motor <strong>apagado</strong> y contacto en ON. Si el motor está en marcha, se rechaza.</li>
-        <li>Los códigos memorizados se pierden. Guarda antes el reporte HTML si los necesitas.</li>
-        <li>Si la falla sigue presente, el código vuelve cuando la ECU la detecta de nuevo, normalmente con el motor en marcha. En este auto se espera que P1535 vuelva, porque no tiene A/C.</li>
+        <li data-i18n="dtc.dlg1">Motor <strong>apagado</strong> y contacto en ON. Si el motor está en marcha, se rechaza.</li>
+        <li data-i18n="dtc.dlg2">Los códigos memorizados se pierden. Guarda antes el reporte HTML si los necesitas.</li>
+        <li data-i18n="dtc.dlg3">Si la falla sigue presente, el código vuelve cuando la ECU la detecta de nuevo, normalmente con el motor en marcha. En este auto se espera que P1535 vuelva, porque no tiene A/C.</li>
       </ul>
-      <label id="clearPinField" class="field">PIN
+      <label id="clearPinField" class="field"><span data-i18n="dtc.pin">PIN</span>
         <input id="clearPin" type="password" inputmode="numeric" autocomplete="off" minlength="4">
       </label>
       <p id="clearError" class="error" hidden></p>
       <div class="row actions">
-        <button type="button" id="clearCancel" class="btn">Cancelar</button>
-        <button type="submit" id="clearConfirm" class="btn danger">Borrar</button>
+        <button type="button" id="clearCancel" class="btn" data-i18n="dtc.cancel">Cancelar</button>
+        <button type="submit" id="clearConfirm" class="btn danger" data-i18n="dtc.delete">Borrar</button>
       </div>
     </form>
   </dialog>

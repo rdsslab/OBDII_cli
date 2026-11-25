@@ -8,6 +8,7 @@
   --accent: #0284c7;
   --accent-text: #ffffff;
   --cool: #0284c7;
+  --gps: #7c3aed;
   --ok: #15803d;
   --warn: #b45309;
   --bad: #b91c1c;
@@ -29,6 +30,7 @@
     --accent: #38bdf8;
     --accent-text: #04121c;
     --cool: #38bdf8;
+    --gps: #c084fc;
     --ok: #4ade80;
     --warn: #fbbf24;
     --bad: #f87171;
@@ -40,7 +42,7 @@
 
 :root[data-theme="dark"] {
   --bg: #0b1117; --surface: #131c25; --surface-2: #1b2632; --text: #e8edf2; --muted: #91a0ae;
-  --border: #263342; --accent: #38bdf8; --accent-text: #04121c; --cool: #38bdf8; --ok: #4ade80; --warn: #fbbf24;
+  --border: #263342; --accent: #38bdf8; --accent-text: #04121c; --cool: #38bdf8; --gps: #c084fc; --ok: #4ade80; --warn: #fbbf24;
   --bad: #f87171; --bar: #38bdf8; --shadow: none; color-scheme: dark;
 }
 
@@ -269,3 +271,23 @@ input[type="number"] { width: 100%; padding: 8px 10px; border-radius: 8px; borde
 }
 @media (max-width: 380px) { .tabs button { font-size: .66rem; } }
 #tab-rec .settings-grid { margin-top: 12px; }
+
+/* Gráficas: historical controls and GPS-sourced speed */
+.file-btn { position: relative; overflow: hidden; cursor: pointer; }
+#chartTrip { max-width: 190px; }
+.chart-card[data-source="gps"] .now, .tile[data-source="gps"] .value { color: var(--gps); }
+.chart-card[data-source="gps"] .bar i, .tile[data-source="gps"] .bar i { background: var(--gps); }
+.tile .name .src { color: var(--ok); font-weight: 700; }
+.tile .name .src.gps { color: var(--gps); }
+
+/* Ajustes → Sensores: visibility and per-sensor ranges/zones */
+.sensor-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(290px, 100%), 1fr)); gap: 10px; margin-top: 12px; }
+.sensor-item { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--surface-2); }
+.sensor-item header { display: flex; align-items: center; gap: 8px; }
+.sensor-item header label { display: flex; align-items: center; gap: 8px; font-weight: 600; flex: 1; cursor: pointer; }
+.sensor-item header input { width: 18px; height: 18px; accent-color: var(--accent); }
+.sensor-item .params { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(88px, 100%), 1fr)); gap: 8px; margin-top: 8px; }
+.sensor-item .params label { display: flex; flex-direction: column; gap: 4px; font-size: .72rem; color: var(--muted); }
+.sensor-item .params input { min-width: 0; width: 100%; }
+.sensor-item.off .params { opacity: .5; }
+@media (max-width: 520px) { .toolbar.wrap { flex-wrap: wrap; } }

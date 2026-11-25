@@ -1,9 +1,14 @@
 /**
  * Shared web UI. Platform-agnostic: it only talks to a "client"
- * (RemoteClient for @obdii/server; later a DirectClient for the PWA and
- * the Android app). See clients/remote-client.js for the contract.
+ * (RemoteClient for @obdii/server; DirectClient for the PWA; Esp32Client for
+ * the ESP32 panel). See clients/remote-client.js for the contract.
  */
-import { meta } from './labels.js';
+import { tripToCSV } from '@obdii/core';
+import { meta, sensorLabel } from './labels.js';
+import { applyStatic, getLang, onLang, setLang, t } from './i18n.js';
+import { isVisible, rangeFor, loadDisplayConfig } from './display-config.js';
+import { startSensorSettings } from './sensor-settings.js';
+import { startGpsSpeed, SPEED_FIELDS } from './gps-speed.js';
 import { startAlerts } from './alerts-ui.js';
 import { startCalibration } from './calibration-ui.js';
 import { startTrips } from './trip-ui.js';
@@ -14,15 +19,20 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (v) => typeof v === 'number' ? (Number.isInteger(v) ? String(v) : v.toFixed(1)) : String(v ?? '—');
 const timeStr = (t) => new Date(t).toLocaleTimeString();
-
-const STATUS_TEXT = { disconnected: 'Desconectado', connecting: 'Conectando…', connected: 'Conectado', watch: 'Vigilando batería', reconnecting: 'Reconectando…', error: 'Error', offline: 'Sin servidor' };
-const MODE_TEXT = { kwp2000: 'KWP2000 (ISO 14230)', obd2: 'OBD2 estándar', unknown: 'sin respuesta' };
+const isSpeed = (name) => SPEED_FIELDS.includes(name);
+const statusText = (status) => {
+    const key = `status.${status}`;
+    const text = t(key);
+    return text === key ? (status || '—') : text;
+};
 
 export function startApp(client) {
     const caps = client.capabilities || {};
     const needsPin = caps.clearNeedsPin !== false;   // server: PIN; PWA: confirmation only
     let state = {};
     let busy = false;
+    let display = loadDisplayConfig();
+    let lastSample = null;
     const stats = new Map();      // field name -> {min, max}
 
     // ── Helpers ───────────────────────────────────────────────
@@ -69,24 +79,27 @@ export function startApp(client) {
         const connected = state.status === 'connected';
         const pill = $('pill');
         pill.dataset.status = state.status || 'disconnected';
-        pill.textContent = STATUS_TEXT[state.status] || state.status || '—';
+        pill.textContent = statusText(state.status || 'disconnected');
         $('volt').hidden = state.voltage == null;
         $('volt').textContent = state.voltage != null ? `${state.voltage} V` : '';
         $('viewers').hidden = !state.clients;
-        $('viewers').textContent = `${state.clients} ${state.clients === 1 ? 'dispositivo' : 'dispositivos'}`;
+        $('viewers').textContent = `${state.clients} ${t(state.clients === 1 ? 'one.device' : 'many.devices')}`;
 
         const rc = state.reconnect;
         $('sStatus').textContent = state.status === 'reconnecting' && rc
-            ? `Reconectando automáticamente (intento ${rc.attempt}${rc.nextAt ? `, en ${Math.max(0, Math.round((rc.nextAt - Date.now()) / 1000))} s` : ', probando…'})`
-            : STATUS_TEXT[state.status] || '—';
+            ? t('conn.reconnecting', {
+                n: rc.attempt,
+                when: rc.nextAt ? t('conn.reconnectNext', { n: Math.max(0, Math.round((rc.nextAt - Date.now()) / 1000)) }) : t('conn.reconnectTrying'),
+            })
+            : statusText(state.status);
         $('sPort').textContent = state.port || '—';
         $('sVersion').textContent = state.version || '—';
-        $('sMode').textContent = MODE_TEXT[state.mode] || '—';
+        $('sMode').textContent = t(`mode.${state.mode}`) !== `mode.${state.mode}` ? t(`mode.${state.mode}`) : '—';
         $('sProfile').textContent = state.profile || '—';
         $('sVolt').textContent = state.voltage != null ? `${state.voltage} V` : '—';
         $('connError').hidden = !state.error;
         $('connError').textContent = state.status === 'reconnecting'
-            ? `${state.error || 'Se perdió la conexión'}. Reintentando solo; «Desconectar» lo cancela.`
+            ? `${state.error || t('conn.reconnectLost')}${t('conn.reconnectHint')}`
             : state.error || '';
 
         const watching = state.status === 'watch';
@@ -99,18 +112,22 @@ export function startApp(client) {
         const canClear = !!state.clearEnabled && typeof client.clearDtcs === 'function';
         $('clearDtc').hidden = !canClear;
         $('clearDtc').disabled = busy || !connected;
-        $('clearHint').textContent = !canClear
-            ? 'Borrar códigos está deshabilitado: inicia el servidor con --pin para habilitarlo.'
-            : needsPin ? 'Borrar códigos pide el PIN del servidor y solo funciona con el motor apagado.'
-            : 'Borrar códigos pide confirmación y solo funciona con el motor apagado.';
+        $('clearHint').textContent = !canClear ? t('dtc.clearDisabled')
+            : needsPin ? t('dtc.clearPin') : t('dtc.clearConfirm');
         $('readEcu').disabled = busy || !connected;
 
         const live = state.live || {};
-        $('liveToggle').disabled = busy || !connected;
-        $('liveToggle').textContent = live.running ? 'Detener' : 'Iniciar';
-        $('liveToggle').classList.toggle('danger', !!live.running);
-        $('liveToggle').classList.toggle('primary', !live.running);
-        $('liveInfo').textContent = live.running ? `${live.source} · ${fmt(live.hz)} lecturas/s` : '';
+        const canLive = !busy && ['connected', 'reconnecting'].includes(state.status);
+        $('liveToggle').disabled = !canLive;
+        $('chartToggle').disabled = !canLive;
+        for (const id of ['liveToggle', 'chartToggle']) {
+            const btn = $(id);
+            btn.textContent = t(live.running ? 'live.stop' : 'live.start');
+            btn.classList.toggle('danger', !!live.running);
+            btn.classList.toggle('primary', !live.running);
+        }
+        $('liveInfo').textContent = live.running ? t('live.readings', { src: live.source, hz: fmt(live.hz) }) : '';
+        $('liveEmpty').hidden = !!lastSample;
     }
 
     // ── Connection ────────────────────────────────────────────
@@ -120,9 +137,9 @@ export function startApp(client) {
         const sel = $('port');
         const prev = sel.value || state.port;
         sel.innerHTML = ports.map(p => {
-            const tag = p.bt === 'outgoing' ? ' — probable ELM327' : p.bt === 'incoming' ? ' — BT entrante' : '';
+            const tag = p.bt === 'outgoing' ? t('conn.btOut') : p.bt === 'incoming' ? t('conn.btIn') : '';
             return `<option value="${esc(p.path)}">${esc(p.label || p.path)}${esc(tag)}</option>`;
-        }).join('') || '<option value="">(sin puertos)</option>';
+        }).join('') || `<option value="">${esc(t('conn.noPorts'))}</option>`;
         const best = ports.find(p => p.path === prev) || ports.find(p => p.bt === 'outgoing') || ports[0];
         if (best) sel.value = best.path;
         portHint();
@@ -131,10 +148,9 @@ export function startApp(client) {
     function portHint() {
         const p = ports.find(x => x.path === $('port').value);
         $('portHint').textContent = !p ? '' :
-            p.isNew ? 'Al conectar, el navegador te pedirá elegir el adaptador. Emparéjalo antes en los ajustes de Bluetooth (PIN 1234 o 0000).' :
-            p.bt === 'outgoing' ? `Bluetooth saliente ${p.mac}: este es normalmente el ELM327.` :
-            p.bt === 'incoming' ? 'Puerto Bluetooth entrante: normalmente NO responde. Elige el saliente.' :
-            p.friendlyName;
+            p.isNew ? t('conn.hintNew') :
+            p.bt === 'outgoing' ? t('conn.hintOut', { mac: p.mac }) :
+            p.bt === 'incoming' ? t('conn.hintIn') : p.friendlyName;
     }
     $('port').addEventListener('change', () => { portHint(); render(); });
     $('refreshPorts').addEventListener('click', () => run(null, loadPorts));
@@ -142,24 +158,25 @@ export function startApp(client) {
     async function loadProfiles() {
         const profiles = await client.listProfiles();
         $('profile').innerHTML = profiles.map(p => `<option value="${esc(p.key)}">${esc(p.name)} — ${esc(p.vehicle)}</option>`).join('')
-            + '<option value="">Detección automática</option>';
+            + `<option value="">${esc(t('conn.autoProfile'))}</option>`;
     }
 
     $('connect').addEventListener('click', () => run($('connect'), async () => {
         await client.connect($('port').value, $('profile').value || null);
-        if (state.status === 'connected') toast('Conectado');
+        if (state.status === 'connected') toast(t('conn.connected'));
     }));
     $('disconnect').addEventListener('click', () => run($('disconnect'), () => client.disconnect()));
     $('watchBattery').addEventListener('click', () => run($('watchBattery'), async () => {
         await client.watchBattery($('port').value);
-        if (state.status === 'watch') toast('Vigilando la batería cada 30 s');
+        if (state.status === 'watch') toast(t('conn.watchBatteryDone'));
     }));
 
     // ── Live data ─────────────────────────────────────────────
-    $('liveToggle').addEventListener('click', () => run($('liveToggle'), async () => {
+    const toggleLive = () => run($('liveToggle'), async () => {
         if (state.live?.running) await client.stopLive();
         else { stats.clear(); await client.startLive(); }
-    }));
+    });
+    $('liveToggle').addEventListener('click', toggleLive);
 
     const dashBox = $('dashMode');
     try { dashBox.checked = localStorage.getItem('obd.dash') === '1'; } catch { /* ignore */ }
@@ -171,6 +188,15 @@ export function startApp(client) {
     dashBox.addEventListener('change', applyDash);
     applyDash();
 
+    function setTileLabel(el, field) {
+        const gps = field.source === 'gps' && isSpeed(field.name);
+        el.querySelector('.lbl').textContent = gps ? t('live.speedGps') : sensorLabel(field.name);
+        const src = el.querySelector('.src');
+        src.textContent = isSpeed(field.name) ? t(gps ? 'live.sourceGps' : 'live.sourceEcu') : '';
+        src.classList.toggle('gps', gps);
+        el.dataset.source = gps ? 'gps' : 'ecu';
+    }
+
     function tileFor(field) {
         const id = `f-${field.name.replace(/[^\w]/g, '_')}`;
         let el = document.getElementById(id);
@@ -179,10 +205,17 @@ export function startApp(client) {
         el = document.createElement('div');
         el.id = id;
         el.className = `tile${m.dash ? ' dash-field' : ''}`;
-        el.innerHTML = `<div class="name"><span>${esc(m.label)}</span>${field.confirmed ? '' : '<span class="badge" title="Escala sin confirmar">sin confirmar</span>'}</div>
+        el.innerHTML = `<div class="name"><span class="lbl"></span><span class="src"></span>${field.confirmed ? '' : `<span class="badge" title="${esc(t('live.unconfirmed'))}">${esc(t('live.unconfirmed'))}</span>`}</div>
             <div class="value"></div>${m.max != null ? '<div class="bar"><i></i></div>' : ''}<div class="mm"></div>`;
         $('liveGrid').appendChild(el);
+        setTileLabel(el, field);
         return el;
+    }
+
+    function rebuildLive() {
+        $('liveGrid').innerHTML = '';
+        stats.clear();
+        if (lastSample) onLive(lastSample);
     }
 
     let lastLiveAt = 0;
@@ -191,64 +224,73 @@ export function startApp(client) {
         const age = Date.now() - lastLiveAt;
         const stale = !!lastLiveAt && running && age > 4000 && state.status !== 'watch';
         $('liveGrid').classList.toggle('stale', stale);
-        if (stale) $('liveInfo').textContent = `Sin datos nuevos hace ${Math.round(age / 1000)} s · ${state.status === 'reconnecting' ? 'reconectando' : 'recuperando la comunicación'}…`;
+        if (stale) $('liveInfo').textContent = t('live.noData', {
+            n: Math.round(age / 1000),
+            why: t(state.status === 'reconnecting' ? 'conn.whyReconnect' : 'conn.whyRecover'),
+        });
     }, 1000);
 
     function onLive(sample) {
         lastLiveAt = Date.now();
+        lastSample = sample;
         $('liveEmpty').hidden = true;
         for (const f of sortFields(sample.fields)) {
             const el = tileFor(f);
+            const shown = isVisible(f.name, sensorSettings.getConfig());
+            el.hidden = !shown;
+            if (!shown) continue;
             const m = meta(f.name);
             const num = typeof f.value === 'number';
             const unit = f.unit && f.unit !== 'raw' ? f.unit : '';
             const v = el.querySelector('.value');
             v.classList.toggle('text', !num);
             v.innerHTML = `${esc(fmt(f.value))}${unit ? `<small>${esc(unit)}</small>` : ''}`;
+            setTileLabel(el, f);
             if (num) {
                 const s = stats.get(f.name) || { min: f.value, max: f.value };
                 s.min = Math.min(s.min, f.value); s.max = Math.max(s.max, f.value);
                 stats.set(f.name, s);
-                el.querySelector('.mm').textContent = `mín ${fmt(s.min)} · máx ${fmt(s.max)}`;
+                el.querySelector('.mm').textContent = t('live.minmax', { min: fmt(s.min), max: fmt(s.max) });
+                const r = rangeFor(f.name, display);
                 const bar = el.querySelector('.bar i');
-                if (bar) bar.style.width = `${Math.max(0, Math.min(100, (f.value - m.min) / (m.max - m.min) * 100))}%`;
-                const zone = sensorZone(f.name, f.value, alerts.engine.config);
+                if (bar && r) bar.style.width = `${r.max > r.min ? Math.max(0, Math.min(100, (f.value - r.min) / (r.max - r.min) * 100)) : 0}%`;
+                const zone = sensorZone(f.name, f.value, alerts.engine.config, display);
                 el.dataset.zone = zone;
                 el.classList.toggle('warn', zone === 'warn' || zone === 'bad');
             }
         }
         $('liveRaw').textContent = sample.raw || '';
         if (state.live) state.live.hz = sample.hz;
-        $('liveInfo').textContent = state.live?.running ? `${state.live.source} · ${fmt(sample.hz)} lecturas/s` : '';
+        $('liveInfo').textContent = state.live?.running ? t('live.readings', { src: state.live.source, hz: fmt(sample.hz) }) : '';
     }
 
     // ── DTCs ──────────────────────────────────────────────────
     function renderDtcs(result) {
         const list = $('dtcList');
-        $('dtcInfo').textContent = result ? `Leído a las ${timeStr(result.t)}${result.source ? ` · ${result.source}` : ''}` : '';
+        $('dtcInfo').textContent = result ? t('dtc.readAt', { t: timeStr(result.t), src: result.source ? ` · ${result.source}` : '' }) : '';
         const reportUrl = client.reportUrl?.();
         $('report').hidden = !result || !reportUrl;
         if (reportUrl) $('report').href = reportUrl;
-        if (!result) { list.innerHTML = '<p class="empty">Toca «Leer códigos» con el vehículo conectado.</p>'; return; }
+        if (!result) { list.innerHTML = `<p class="empty">${esc(t('dtc.prompt'))}</p>`; return; }
         if (!result.dtcs.length) {
-            list.innerHTML = `<div class="ok-banner">Sin códigos de error.${result.errors?.length ? `<p class="hint">${esc(result.errors.join(' · '))}</p>` : ''}</div>`;
+            list.innerHTML = `<div class="ok-banner">${esc(t('dtc.none'))}${result.errors?.length ? `<p class="hint">${esc(result.errors.join(' · '))}</p>` : ''}</div>`;
             return;
         }
         list.innerHTML = result.dtcs.map(d => {
             const i = d.info;
             const li = (arr) => (arr || []).map(x => `<li>${esc(x)}</li>`).join('');
             return `<article class="dtc${d.milOn ? ' mil' : ''}">
-                <header><span class="code">${esc(d.code)}</span><span class="desc">${esc(i?.description || 'Código sin descripción en la base de datos')}</span></header>
+                <header><span class="code">${esc(d.code)}</span><span class="desc">${esc(i?.description || t('dtc.unknown'))}</span></header>
                 <div class="tags">
-                    ${d.present ? '<span class="tag bad">presente ahora</span>' : '<span class="tag">memorizado</span>'}
-                    ${d.milOn ? '<span class="tag bad">MIL encendida</span>' : ''}
+                    ${d.present ? `<span class="tag bad">${esc(t('dtc.present'))}</span>` : `<span class="tag">${esc(t('dtc.stored'))}</span>`}
+                    ${d.milOn ? `<span class="tag bad">${esc(t('dtc.mil'))}</span>` : ''}
                 </div>
                 <div class="detail">${esc(d.detail)}</div>
-                ${i ? `<details><summary>Explicación y soluciones</summary>
+                ${i ? `<details><summary>${esc(t('dtc.explain'))}</summary>
                     <p>${esc(i.explanation)}</p>
-                    <h3>Causas comunes</h3><ul>${li(i.causes)}</ul>
-                    <h3>Qué revisar</h3><ol>${li(i.solutions)}</ol>
-                    <h3>Riesgos</h3><p>${esc(i.risks)}</p>
+                    <h3>${esc(t('dtc.causes'))}</h3><ul>${li(i.causes)}</ul>
+                    <h3>${esc(t('dtc.check'))}</h3><ol>${li(i.solutions)}</ol>
+                    <h3>${esc(t('dtc.risks'))}</h3><p>${esc(i.risks)}</p>
                 </details>` : ''}
             </article>`;
         }).join('');
@@ -270,15 +312,15 @@ export function startApp(client) {
         ev.preventDefault();
         const btn = $('clearConfirm');
         btn.disabled = true;
-        btn.textContent = 'Borrando…';
+        btn.textContent = t('dtc.deleting');
         try {
             const r = await client.clearDtcs($('clearPin').value);
             if (r.ok) {
                 dlg.close();
                 const left = r.after?.dtcs?.length ?? 0;
-                toast(left ? `Códigos borrados. Volvió a aparecer: ${r.after.dtcs.map(d => d.code).join(', ')}` : 'Códigos borrados. Sin códigos.');
+                toast(left ? t('dtc.cameBack', { codes: r.after.dtcs.map(d => d.code).join(', ') }) : t('dtc.deleted'));
             } else {
-                $('clearError').textContent = r.error || 'La ECU no confirmó el borrado';
+                $('clearError').textContent = r.error || t('dtc.notConfirmed');
                 $('clearError').hidden = false;
             }
         } catch (err) {
@@ -286,18 +328,18 @@ export function startApp(client) {
             $('clearError').hidden = false;
         } finally {
             btn.disabled = false;
-            btn.textContent = 'Borrar';
+            btn.textContent = t('dtc.delete');
         }
     });
 
     // ── ECU info ──────────────────────────────────────────────
     function renderEcu(info) {
-        $('ecuInfo').textContent = info ? `Leído a las ${timeStr(info.t)}` : '';
-        if (!info) { $('ecuList').innerHTML = '<dt>—</dt><dd>Toca «Leer identificación».</dd>'; return; }
+        $('ecuInfo').textContent = info ? t('ecu.readAt', { t: timeStr(info.t) }) : '';
+        if (!info) { $('ecuList').innerHTML = `<dt>—</dt><dd>${esc(t('ecu.prompt'))}</dd>`; return; }
         const rows = info.entries.map(e => `<dt>${esc(e.name)}${e.id ? ` <small>[1A${esc(e.id)}]</small>` : ''}</dt>
-            <dd>${e.empty ? '<span class="muted">sin programar</span>' : `${esc(e.text)}<small>${esc(e.hex)}</small>`}</dd>`);
-        if (info.profile) rows.push(`<dt>Perfil</dt><dd>${esc(info.profile.name)} — ${esc(info.profile.vehicle)}</dd>`);
-        $('ecuList').innerHTML = rows.join('') || '<dt>—</dt><dd>La ECU no devolvió identificación.</dd>';
+            <dd>${e.empty ? `<span class="muted">${esc(t('ecu.notProgrammed'))}</span>` : `${esc(e.text)}<small>${esc(e.hex)}</small>`}</dd>`);
+        if (info.profile) rows.push(`<dt>${esc(t('ecu.profile'))}</dt><dd>${esc(info.profile.name)} — ${esc(info.profile.vehicle)}</dd>`);
+        $('ecuList').innerHTML = rows.join('') || `<dt>—</dt><dd>${esc(t('ecu.noInfo'))}</dd>`;
     }
     $('readEcu').addEventListener('click', () => run($('readEcu'), () => client.readEcuInfo()));
 
@@ -317,9 +359,10 @@ export function startApp(client) {
             const wasRunning = state.live?.running;
             state = s;
             if (wasRunning && !s.live?.running) $('liveInfo').textContent = '';
+            gps.setRunning(s.status === 'connected' && !!s.live?.running);
             render();
         })
-        .on('live', onLive)
+        .on('live', (raw) => onLive(gps.resolve(raw)))
         .on('dtcs', renderDtcs)
         .on('ecu-info', renderEcu)
         .on('log', addLog)
@@ -328,21 +371,60 @@ export function startApp(client) {
         });
 
     // Platform differences come from the client's capabilities
-    $('sessionHint').textContent = caps.sharedSession
-        ? 'Pon el contacto en ON antes de conectar. La conexión es compartida: todos los dispositivos ven la misma sesión.'
-        : caps.esp32
-            ? 'Pon el contacto en ON antes de conectar. El ESP32 mantiene el Bluetooth con el ELM327; un solo dispositivo a la vez maneja el adaptador (si otro se conecta, toma el control).'
-            : 'Pon el contacto en ON antes de conectar. Este dispositivo se conecta directo al ELM327.';
+    $('sessionHint').textContent = caps.sharedSession ? t('conn.sessionShared')
+        : caps.esp32 ? t('conn.sessionEsp32') : t('conn.sessionDirect');
     $('unsupported').hidden = caps.webSerial !== false;
     $('esp32Hint').hidden = !caps.esp32;
 
     const alerts = startAlerts(client, { toast, onLog: addLog });
-    startCharts(client, { getAlertConfig: () => alerts.engine.config });
+    const gps = startGpsSpeed();
+    const trips = startTrips(client, { toast, onLog: addLog, getState: () => state, alerts });
+    const sensorSettings = startSensorSettings({
+        onChange: (cfg) => { display = cfg; rebuildLive(); },
+    });
+    startCharts(client, {
+        getAlertConfig: () => alerts.engine.config,
+        getDisplayConfig: () => sensorSettings.getConfig(),
+        getState: () => ({ ...state, busy }),
+        resolveSample: (s) => gps.resolve(s),
+        toggleLive: () => run($('liveToggle'), async () => {
+            if (state.live?.running) await client.stopLive();
+            else { stats.clear(); await client.startLive(); }
+        }),
+        listTrips: async () => (await trips?.backend.list()) || [],
+        readTrip: async (id) => {
+            if (!trips) return null;
+            if (trips.backend.kind === 'server') return (await fetch(trips.backend.client.tripCsvUrl(id))).text();
+            return tripToCSV(await trips.backend.store.records(id));
+        },
+        toast,
+    });
     startCalibration(client, { toast, onLog: addLog, getState: () => state, alerts });
-    startTrips(client, { toast, onLog: addLog, getState: () => state, alerts });
+
+    // ── Language ──────────────────────────────────────────────
+    applyStatic();
+    $('uiLang').value = getLang();
+    $('uiLang').addEventListener('change', (e) => {
+        setLang(e.target.value);
+        render();
+        rebuildLive();
+        renderDtcs(null);
+        renderEcu(null);
+    });
+    onLang(() => {
+        portHint();
+        if ($('esp32Hint').hidden === false) {
+            $('esp32Hint').firstElementChild.textContent = `${t('conn.esp32')} `;
+            $('esp32Hint').querySelector('a').textContent = t('conn.esp32Link');
+        }
+        $('sessionHint').textContent = caps.sharedSession ? t('conn.sessionShared')
+            : caps.esp32 ? t('conn.sessionEsp32') : t('conn.sessionDirect');
+        $('tripWhere').textContent = trips?.backend?.kind === 'server' ? t('rec.whereServer') : t('rec.whereLocal', { s: 3 });
+    });
 
     renderDtcs(null);
     renderEcu(null);
+    render();
     client.start();
     Promise.all([loadPorts(), loadProfiles()]).catch(err => toast(err.message));
 }

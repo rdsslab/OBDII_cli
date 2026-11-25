@@ -29,6 +29,7 @@ Una aplicación interactiva en línea de comandos (CLI) desarrollada en **Node.j
   - Cierre limpio de la sesión KWP (`82`) al salir, para que el siguiente arranque conecte de inmediato.
   - Los comandos al puerto serie se envían en cola, uno a la vez.
 - **Consola de Comandos Personalizados:** Envío directo de tramas hexadecimales personalizadas y comandos AT/OBD/KWP para depuración avanzada.
+- **Panel web compartido:** mismo diseño en el servidor local, la PWA y el ESP32, con **interfaz en español o inglés**, sensores configurables, gráficas en vivo e históricas y velocidad de respaldo por GPS.
 - **Escaneo de Servicios del Módulo:** Comprobación rápida para descubrir qué servicios específicos (OBD2/KWP/UDS) admite la ECU conectada.
 
 ---
@@ -50,7 +51,7 @@ Monorepo con *npm workspaces*: un núcleo independiente de la plataforma y una a
   - 📄 [**session.js**](packages/core/src/session.js): `ObdSession`, la sesión compartida (conexión, tiempo real con recuperación escalonada, borrado). La usan el servidor y la PWA.
   - 📄 [**sim-transport.js**](packages/core/src/sim-transport.js): ELM327 + ECU SIM2K-33 simulados con capturas reales, para pruebas y demostraciones sin el auto.
 - 📁 **packages/serial-node/** (`@obdii/serial-node`): transporte para Node.js con `serialport` (puerto COM / Bluetooth SPP). Lo usan la consola y el servidor web.
-- 📁 **packages/ui/** (`@obdii/ui`): interfaz web común, sin paso de compilación (HTML + CSS + JavaScript). Pantallas de conexión, tiempo real (con modo tablero), gráficas en tiempo real, códigos, ECU y registro.
+- 📁 **packages/ui/** (`@obdii/ui`): interfaz web común, sin paso de compilación (HTML + CSS + JavaScript). Pantallas de conexión, tiempo real (con modo tablero), gráficas en vivo e históricas, códigos, ECU, grabación y registro. Módulos propios para idioma (`i18n.js`), preferencias de sensores (`display-config.js`, `sensor-settings.js`), GPS (`gps-speed.js`) y lectura de CSV (`csv-chart.js`).
 - 📁 **packages/web-serial/** (`@obdii/web-serial`): transporte Web Serial para el navegador (Chrome / Edge; adaptador USB o Bluetooth emparejado).
 - 📁 **apps/server/** (`@obdii/server`): servidor web local; se conecta al ELM327 y sirve la interfaz a todos los dispositivos de la red.
 - 📁 **apps/pwa/** (`@obdii/pwa`): app web instalable (PWA) que se conecta directo al ELM327 con Web Serial; se publica en GitHub Pages.
@@ -123,7 +124,7 @@ Al arrancar muestra las direcciones para abrir desde otros dispositivos (por eje
 - **Conexión:** elegir puerto (marca el Bluetooth saliente como "probable ELM327") y perfil de ECU.
 - **Tiempo real:** el servidor lee la ECU **una sola vez** y envía cada muestra a todos los dispositivos (Server-Sent Events). Tarjetas con valor, barra y mín/máx, siempre en este orden: velocidad, RPM, temperatura, batería, acelerador, estado del motor y el resto. El color pasa de azul (frío/bajo) a verde, ámbar cerca del máximo y rojo en zona peligrosa; los umbrales de las alertas configuradas también mueven el color. Las escalas sin confirmar llevan la marca "sin confirmar".
   - **Modo tablero:** pocos valores en grande, pensado para el radio del auto. Se abre directo con `http://<ip>:3000/?tablero#live`.
-  - **Gráficas:** pestaña con un plano cartesiano por sensor numérico, en el mismo orden. Ventana configurable de 30/60/120 s, ejes con escala del sensor y traza coloreada por zona.
+  - **Gráficas:** pestaña con un plano cartesiano por sensor numérico, en el mismo orden; **botón Iniciar/Detener propio**, ventana de 30/60/120 s, ejes con la escala configurada del sensor y traza coloreada por zona. Admite **cargar un CSV grabado antes** o elegir una **grabación guardada**; el modo histórico conserva las fechas reales hasta que pulses «Limpiar» o inicies el tiempo real.
   - **Grabar CSV:** guarda las muestras en el dispositivo que lo pide, incluida la columna de bytes crudos.
 - **Códigos:** DTCs con su estado (presente/memorizado, MIL) y la explicación, causas y soluciones de la base de datos. Botón para abrir el reporte HTML.
   - **Borrar códigos:** solo aparece si el servidor se inició con `--pin` (o la variable `OBD_PIN`). Pide confirmación y el PIN en cada borrado, se niega si el motor está en marcha y vuelve a leer los códigos después. Tras 5 PIN incorrectos se bloquea 60 s.
@@ -132,7 +133,7 @@ Al arrancar muestra las direcciones para abrir desde otros dispositivos (por eje
 
 **Escrituras en la ECU:** la única es «Borrar códigos» (servicio `14 FF 00` / OBD2 `04`), y solo con PIN. No hay funciones para reiniciar la ECU ni activar actuadores. Si se cae la conexión con la ECU durante el tiempo real, recupera la sesión sola (≈6 s de silencio en la línea K, igual que la consola). `Ctrl+C` cierra la sesión con la ECU (`82`) antes de salir.
 
-La pestaña inicial se puede elegir en la URL: `#conn`, `#live`, `#dtc`, `#ecu`, `#log`.
+La pestaña inicial se puede elegir en la URL: `#conn`, `#live`, `#charts`, `#dtc`, `#ecu`, `#rec`, `#cfg`, `#log`.
 
 ---
 
@@ -157,7 +158,7 @@ En Windows, el ELM327 emparejado aparece en el selector como su puerto COM (el s
 
 **Publicación:** el workflow [.github/workflows/pages.yml](.github/workflows/pages.yml) prueba el núcleo, compila y publica `apps/pwa/dist` en GitHub Pages en cada push a `main` que toque la PWA, la interfaz o el núcleo. La compilación no usa dependencias: copia la interfaz y el núcleo y resuelve los módulos con un *import map*.
 
-Diferencias con el servidor: la sesión es de un solo dispositivo, y «Borrar códigos» pide confirmación pero no PIN.
+Diferencias con el servidor: la sesión es de un solo dispositivo, y «Borrar códigos» pide confirmación pero no PIN. La PWA sí puede usar el GPS (velocidad de respaldo, calibración y grabación). El service worker guarda los archivos en caché: si después de publicar no ves los cambios, haz una recarga forzada (`Ctrl+Mayús+R`) o cierra y vuelve a abrir la app.
 
 ---
 
@@ -213,6 +214,29 @@ La pantalla compara la velocidad del GPS con la de la ECU y muestra en vivo:
 - el **byte del bloque 2101 que mejor sigue al GPS**, por si la velocidad real está en otro byte.
 
 **Descargar CSV** genera un archivo con cada punto: velocidades, precisión, RPM, estado del motor y el bloque 2101 completo en hexadecimal, para analizarlo después. Las coordenadas no se guardan salvo que marques «Incluir coordenadas». Desde el servidor de la red local no funciona, porque los navegadores solo dan acceso al GPS en HTTPS o localhost.
+
+---
+
+## 🎛️ Idioma, sensores y gráficas históricas (interfaces web)
+
+### Idioma de la interfaz
+En **Ajustes → Idioma de la interfaz** eliges **Español** o **English**. Se traducen todas las pestañas, etiquetas, botones, avisos y textos de ayuda, y se guarda por dispositivo. El **Idioma de la voz** sigue siendo independiente: puedes tener la interfaz en inglés y las alertas habladas en español (o al revés). Las alertas usan el idioma de la interfaz para los textos en pantalla.
+
+### Sensores visibles y escalas
+En **Ajustes → Sensores visibles y escalas** hay un interruptor por sensor que lo muestra u oculta **a la vez en Tiempo real y en Gráficas**. Para cada sensor numérico se pueden editar:
+
+| Parámetro | Uso |
+|---|---|
+| Mín / Máx | Escala de la barra y del eje Y de la gráfica |
+| Normal desde | Color verde (tras el azul de frío/bajo) |
+| Aviso desde | Color ámbar |
+| Peligro desde | Color rojo |
+| Aviso bajo / Peligro bajo | Umbrales inferiores (batería, nivel de combustible, corrección de mezcla) |
+
+Valores por defecto: velocidad **0–150 km/h**, RPM 0–7000, refrigerante 0–120 °C, batería 10–16 V, acelerador 0–100 %, MAP 0–105, temperatura de admisión −10–90 °C. «Restaurar sensores» vuelve a esos valores. Las zonas se **fusionan con los umbrales de Alertas**: si una alerta está en rojo, el color no puede suavizarse a verde ni a ámbar aunque el sensor diga otra cosa. Los sensores ocultos dejan de dibujarse en ambos paneles.
+
+### Velocidad de respaldo por GPS
+Cuando la ECU **no envía velocidad o marca 0**, pero el GPS del dispositivo tiene un fix reciente (≤ 3 s) y marca **≥ 5 km/h**, la tarjeta y la gráfica muestran ese valor con la etiqueta **GPS** en color morado/cian en lugar de **ECU**. Con velocidad de ECU válida se sigue usando la ECU, aunque haya GPS. El GPS solo está disponible en la PWA publicada (HTTPS) o en `localhost`; en el servidor de la red local no funciona por las restricciones del navegador. Los CSV grabados con `gps_kmh` aplican la misma regla al visualizarse.
 
 ---
 
